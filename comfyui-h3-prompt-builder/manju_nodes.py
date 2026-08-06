@@ -378,6 +378,12 @@ class ManjuResourceMapping:
                 assets_valid = True
             except Exception:
                 assets_valid = False
+        if not text and not assets_valid and storyboard_json and storyboard_json.strip():
+            try:
+                assets = json.loads(derive_assets_from_storyboard(storyboard_json))
+                assets_valid = True
+            except Exception:
+                pass
         if not text and assets_valid:
             lines = []
             mapping = {}

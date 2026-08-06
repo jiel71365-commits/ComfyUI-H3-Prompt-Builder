@@ -486,6 +486,14 @@ class TestShotSelect(unittest.TestCase):
         it = manju_nodes.ManjuResourceMapping.INPUT_TYPES()
         self.assertEqual(it["optional"]["shot_index"][1].get("default"), 0)
 
+    def test_derive_assets_when_missing(self):
+        node = manju_nodes.ManjuResourceMapping()
+        out = node.build("", "", False, TestManjuRefs.STORYBOARD, 1)
+        mapping = json.loads(out[0])
+        self.assertIn("角色A", mapping)
+        self.assertIn("场景A", mapping)
+        self.assertIn("Shot 1:", out[3])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
