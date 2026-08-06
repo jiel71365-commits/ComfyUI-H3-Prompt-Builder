@@ -273,5 +273,41 @@ class TestManjuNodes(unittest.TestCase):
         self.assertIn("错误：", out[0])
 
 
+class TestManjuV2Preset(unittest.TestCase):
+    def test_preset_policy(self):
+        out = manju_nodes.build_preset_json("古风", "9:16", "120", "自动（英文结构+保留原文）", "仅禁BGM")
+        self.assertEqual(json.loads(out)["audio_text_policy"], "仅禁BGM")
+
+
+class TestDeriveAssets(unittest.TestCase):
+    def test_derive_assets(self):
+        out = manju_nodes.derive_assets_from_storyboard(TestManjuRefs.STORYBOARD)
+        assets = json.loads(out)
+        self.assertEqual([c["id"] for c in assets["characters"]], ["角色A", "角色B"])
+        self.assertEqual(assets["scenes"][0]["id"], "场景A")
+        self.assertEqual(assets["props"][0]["id"], "道具A")
+        self.assertIn(2, assets["props"][0]["shots"])
+
+
+class TestResolveLlm(unittest.TestCase):
+    def test_llm_config_overrides_config(self):
+        k, m, u, t, cfg, warn = manju_nodes.resolve_llm_config(
+            "", "", "", '{"api_key":"k1","model":"m1","base_url":"https://x","temperature":0.3}'
+        )
+        self.assertEqual(k, "k1")
+        self.assertEqual(m, "m1")
+        self.assertEqual(u, "https://x")
+        self.assertEqual(t, 0.3)
+        self.assertIsNone(warn)
+
+    def test_node_field_wins_over_llm_config(self):
+        k, _, _, _, _, _ = manju_nodes.resolve_llm_config("k2", "", "", '{"api_key":"k1"}')
+        self.assertEqual(k, "k2")
+
+    def test_invalid_llm_config_warns(self):
+        _, _, _, _, _, warn = manju_nodes.resolve_llm_config("", "", "", "not json")
+        self.assertIn("llm_config", warn)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

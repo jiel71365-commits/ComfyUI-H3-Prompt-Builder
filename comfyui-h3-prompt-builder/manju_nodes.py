@@ -15,15 +15,18 @@ STYLES = ["古风", "都市", "校园", "科幻", "悬疑", "奇幻", "甜宠", 
 ASPECT_RATIOS = ["9:16", "16:9", "1:1", "4:3", "3:4", "21:9"]
 DURATIONS = ["自动", "60", "90", "120", "180", "300"]
 OUTPUT_LANGUAGES = ["自动（英文结构+保留原文）", "中文提示词", "全英文"]
+AUDIO_TEXT_POLICIES = ["禁字幕+无BGM", "仅禁BGM", "仅禁字幕", "保留默认"]
+DEFAULT_MANJU_POLICY = "禁字幕+无BGM"
 
 
-def build_preset_json(style, aspect_ratio, duration, output_language):
+def build_preset_json(style, aspect_ratio, duration, output_language, audio_text_policy=DEFAULT_MANJU_POLICY):
     """组装漫剧预设 JSON。"""
     preset = {
         "style": style,
         "aspect_ratio": aspect_ratio,
         "duration": None if duration == "自动" else int(duration),
         "output_language": output_language,
+        "audio_text_policy": audio_text_policy,
     }
     return json.dumps(preset, ensure_ascii=False, indent=2)
 
@@ -210,12 +213,86 @@ def _build_summary(storyboard):
     return "\n".join(lines)
 
 
-def _llm_args(api_key, model, base_url):
+def resolve_llm_config(api_key, model, base_url, llm_config_json=""):
+    """解析 LLM 参数。优先级：节点单独字段 > llm_config JSON > config.json。"""
     config = load_config()
-    key = (api_key or "").strip() or config.get("api_key", "")
-    model_name = (model or "").strip() or config.get("model", "deepseek-v4-flash")
-    endpoint = (base_url or "").strip() or config.get("base_url", "https://api.deepseek.com/chat/completions")
-    return key, model_name, endpoint, config
+    overrides = {}
+    warning = None
+    text = (llm_config_json or "").strip()
+    if text:
+        try:
+            overrides = json.loads(text)
+        except Exception:
+            warning = "llm_config 不是合法 JSON，已忽略"
+
+    def first(*values):
+        for value in values:
+            if value is not None and str(value).strip() != "":
+                return str(value).strip()
+        return None
+
+    key = first(api_key, overrides.get("api_key"), config.get("api_key"))
+    model_name = first(model, overrides.get("model"), config.get("model")) or "deepseek-v4-flash"
+    endpoint = first(base_url, overrides.get("base_url"), config.get("base_url")) or "https://api.deepseek.com/chat/completions"
+    temperature = overrides.get("temperature")
+    if temperature is not None:
+        try:
+            temperature = float(temperature)
+        except Exception:
+            temperature = None
+    return key, model_name, endpoint, temperature, config, warning
+
+
+def derive_assets_from_storyboard(storyboard_json):
+    """从分镜 JSON 反推资源清单（离线，description 为空）。"""
+    storyboard = _load_json(storyboard_json, "storyboard_json")
+    assets = {"characters": [], "scenes": [], "props": []}
+    seen = {"characters": set(), "scenes": set(), "props": set()}
+
+    def add(category, item_id, shot_id):
+        if not item_id:
+            return
+        if item_id in seen[category]:
+            item = next(x for x in assets[category] if x["id"] == item_id)
+            if shot_id not in item["shots"]:
+                item["shots"].append(shot_id)
+            return
+        seen[category].add(item_id)
+        assets[category].append({"id": item_id, "description": "", "shots": [shot_id]})
+
+    for shot in storyboard.get("shots", []):
+        shot_id = shot.get("shot_id")
+        for cid in shot.get("characters", []):
+            add("characters", cid, shot_id)
+        add("scenes", shot.get("scene"), shot_id)
+        for pid in shot.get("props", []):
+            add("props", pid, shot_id)
+    return json.dumps(assets, ensure_ascii=False, indent=2)
+
+
+def _build_image_prompts(assets):
+    """根据资源清单生成设定图提示词（本地模板）。"""
+    lines = []
+    for item in assets.get("characters", []):
+        desc = item.get("description", "") or ""
+        lines.append("%s：%s，漫剧角色设定图，竖屏9:16，半身立绘，简洁背景，高清" % (item.get("id", "角色"), desc))
+    for item in assets.get("scenes", []):
+        desc = item.get("description", "") or ""
+        lines.append("%s：%s，漫剧场景空镜图，竖屏9:16，无人物，干净构图" % (item.get("id", "场景"), desc))
+    for item in assets.get("props", []):
+        desc = item.get("description", "") or ""
+        lines.append("%s：%s，漫剧道具特写图，竖屏9:16，简洁背景" % (item.get("id", "道具"), desc))
+    return "\n".join(lines)
+
+
+def _policy_from_preset(preset_json, default=DEFAULT_MANJU_POLICY):
+    if preset_json and preset_json.strip():
+        try:
+            preset = json.loads(preset_json)
+            return preset.get("audio_text_policy") or default
+        except Exception:
+            pass
+    return default
 
 
 class ManjuPreset:
