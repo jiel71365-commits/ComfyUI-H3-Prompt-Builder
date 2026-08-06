@@ -141,12 +141,20 @@ def call_llm(base_url, api_key, model, system_prompt, user_text, temperature=0.4
 
     body = post(max_tokens)
     content, finish = extract(body)
-    if not content and finish == "length" and max_tokens < 65536:
-        body = post(min(max_tokens * 2, 65536))
-        content, finish = extract(body)
     if not content:
+        if finish == "length" and max_tokens < 65536:
+            body = post(min(max_tokens * 2, 65536))
+            content, finish = extract(body)
+        else:
+            body = post(max_tokens)
+            content, finish = extract(body)
+    if not content:
+        if finish == "length":
+            raise RuntimeError(
+                "模型未返回正文（finish_reason=length：推理占满了 max_tokens，已自动加倍重试仍失败；请调大 config.json 的 max_tokens）"
+            )
         raise RuntimeError(
-            "模型未返回正文（finish_reason=%s，推理过程占满了 max_tokens，请调大 config.json 的 max_tokens）" % (finish,)
+            "模型未返回正文（finish_reason=%s：模型思考后未产出正文，已自动重试仍失败；请再运行一次，若持续出现请把需求文本发我排查）" % (finish,)
         )
     return content
 

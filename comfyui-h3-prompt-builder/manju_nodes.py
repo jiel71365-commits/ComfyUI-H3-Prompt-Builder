@@ -447,12 +447,16 @@ class ManjuScriptToStoryboard:
         key, model_name, endpoint, temperature, config, warning = resolve_llm_config(api_key, model, base_url, llm_config)
         if not key:
             return ("未配置 API Key：请在 LLM 配置节点、节点 api_key 输入框或 config.json 中填写。", "{}", "")
-        extra = "【本集预设】\n" + (preset_json or "{}") + "\n\n【剧本原文】\n" + script
-        system = build_manju_system_prompt("manju_storyboard.txt", extra)
+        system = build_manju_system_prompt("manju_storyboard.txt", "")
+        user_msg = (
+            "【本集预设】\n" + (preset_json or "{}")
+            + "\n\n【剧本原文】\n" + script
+            + "\n\n请根据以上剧本与预设生成分镜 JSON（storyboard + assets）。"
+        )
         temp = temperature if temperature is not None else config.get("manju_temperature", 0.2)
         try:
             raw = call_llm(
-                endpoint, key, model_name, system, "请根据以上剧本与预设生成分镜 JSON。",
+                endpoint, key, model_name, system, user_msg,
                 temperature=temp,
                 max_tokens=config.get("max_tokens", 32768),
             )
@@ -511,13 +515,13 @@ class ManjuShotPrompt:
         def gen_one(idx):
             refs = compute_shot_refs(storyboard_json, mapping_json, idx)
             wiring = build_wiring_note(storyboard_json, mapping_json, idx)
-            extra = "【本镜数据】\n" + json.dumps(
+            user_msg = "【本镜数据】\n" + json.dumps(
                 {"shot": refs["shot"], "tags": refs["tags"], "missing": refs["missing"], "policy": policy},
                 ensure_ascii=False, indent=2,
-            )
-            system = build_manju_system_prompt("manju_shot_prompt.txt", extra)
+            ) + "\n\n请按规则生成该镜头的 H3 提示词。"
+            system = build_manju_system_prompt("manju_shot_prompt.txt", "")
             prompt = call_llm(
-                endpoint, key, model_name, system, "请按规则生成该镜头的 H3 提示词。",
+                endpoint, key, model_name, system, user_msg,
                 temperature=temp,
                 max_tokens=config.get("max_tokens", 32768),
             )

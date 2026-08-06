@@ -94,6 +94,16 @@ class TestCallLlmRetry(unittest.TestCase):
         self.assertIn("未返回正文", str(ctx.exception))
         self.assertEqual(calls["n"], 2)
 
+    def test_retries_when_stop_with_empty_content(self):
+        fake, calls = self._fake_urlopen([
+            {"choices": [{"message": {"content": ""}, "finish_reason": "stop"}]},
+            {"choices": [{"message": {"content": "done"}, "finish_reason": "stop"}]},
+        ])
+        with unittest.mock.patch.object(nodes.urllib.request, "urlopen", side_effect=fake):
+            result = nodes.call_llm("https://api.deepseek.com", "k", "m", "sys", "user", max_tokens=8192)
+        self.assertEqual(result, "done")
+        self.assertEqual(calls["n"], 2)
+
 
 class TestTemplate(unittest.TestCase):
     def test_t2va(self):
@@ -375,13 +385,28 @@ class TestManjuV2Nodes(unittest.TestCase):
         captured = []
 
         def fake_llm(*args, **kwargs):
-            captured.append(args[3])
+            captured.append(args[4])
             return "P"
 
         node = manju_nodes.ManjuShotPrompt()
         with unittest.mock.patch.object(manju_nodes, "call_llm", side_effect=fake_llm):
             node.build(sb_json, TestManjuRefs.MAPPING, 1, api_key="k")
         self.assertIn("仅禁字幕", captured[0])
+
+    def test_storyboard_content_in_user_message(self):
+        captured = []
+
+        def fake_llm(*args, **kwargs):
+            captured.append((args[3], args[4]))
+            return '{"storyboard": {"shots": []}, "assets": {}}'
+
+        node = manju_nodes.ManjuScriptToStoryboard()
+        with unittest.mock.patch.object(manju_nodes, "call_llm", side_effect=fake_llm):
+            node.build("第一集测试剧本", "{}", api_key="k")
+        system, user_msg = captured[0]
+        self.assertNotIn("第一集测试剧本", system)
+        self.assertIn("第一集测试剧本", user_msg)
+        self.assertIn("剧本原文", user_msg)
 
     def test_llm_config_node(self):
         node = manju_nodes.ManjuLlmConfig()
