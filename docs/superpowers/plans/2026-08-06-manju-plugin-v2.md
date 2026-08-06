@@ -266,7 +266,9 @@ def _policy_from_preset(preset_json, default=DEFAULT_MANJU_POLICY):
 - [ ] **Step 4: 运行测试，确认通过**
 
 Run: `python comfyui-h3-prompt-builder/self_test.py`
-Expected: 36 项全部 PASS（29 + TestManjuV2Preset 1 + TestDeriveAssets 1 + TestResolveLlm 3 + TestAutoSuggest 2）
+Expected: 34 项全部 PASS（29 + TestManjuV2Preset 1 + TestDeriveAssets 1 + TestResolveLlm 3）
+
+> 说明：TestAutoSuggest 依赖资源映射节点的新签名，随 Task 3 一起加入并验证；Task 2 的 Step 1 代码块虽已包含该测试类，实际执行时先跳过（见 Task 3 Step 0）。
 
 - [ ] **Step 5: Commit**
 
@@ -285,7 +287,7 @@ git commit -m "feat: add manju v2 local logic (resolve/derive/suggest/image prom
 
 - [ ] **Step 0: 追加依赖节点改造的测试（预期先失败）**
 
-在 `self_test.py` 的 `TestAutoSuggest` 类之后、`if __name__` 块之前插入：
+在 `self_test.py` 的 `TestResolveLlm` 类之后、`if __name__` 块之前插入 `TestAutoSuggest`（见 Task 2 Step 1 的代码块）与 `TestManjuV2Nodes`：
 
 ```python
 class TestManjuV2Nodes(unittest.TestCase):
@@ -352,7 +354,7 @@ class TestManjuV2Nodes(unittest.TestCase):
 ```
 
 Run: `python comfyui-h3-prompt-builder/self_test.py`
-Expected: 5 项失败（`module 'manju_nodes' has no attribute 'ManjuLlmConfig'` / 参数不匹配等），其余 36 项通过
+Expected: 7 项失败（TestAutoSuggest 2 + TestManjuV2Nodes 5），其余 34 项通过
 
 - [ ] **Step 1: 改造 ManjuPreset**
 
@@ -682,7 +684,7 @@ __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
 - [ ] **Step 7: 运行全部测试**
 
 Run: `python comfyui-h3-prompt-builder/self_test.py`
-Expected: 41 项全部 PASS（36 + TestManjuV2Nodes 5）
+Expected: 41 项全部 PASS（34 + TestAutoSuggest 2 + TestManjuV2Nodes 5）
 
 - [ ] **Step 8: Commit**
 
