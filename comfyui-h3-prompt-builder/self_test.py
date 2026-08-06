@@ -28,6 +28,27 @@ class TestConfig(unittest.TestCase):
             self.assertTrue(content and len(content) > 50, "style file empty: " + fname)
 
 
+class TestEndpoint(unittest.TestCase):
+    def test_normalize_endpoint(self):
+        self.assertEqual(
+            nodes.normalize_endpoint("https://api.deepseek.com"),
+            "https://api.deepseek.com/chat/completions",
+        )
+        self.assertEqual(
+            nodes.normalize_endpoint("https://api.deepseek.com/"),
+            "https://api.deepseek.com/chat/completions",
+        )
+        self.assertEqual(
+            nodes.normalize_endpoint("https://api.deepseek.com/v1"),
+            "https://api.deepseek.com/v1/chat/completions",
+        )
+        self.assertEqual(
+            nodes.normalize_endpoint("https://api.deepseek.com/chat/completions"),
+            "https://api.deepseek.com/chat/completions",
+        )
+        self.assertEqual(nodes.normalize_endpoint(""), "")
+
+
 class TestTemplate(unittest.TestCase):
     def test_t2va(self):
         out = nodes.build_template("一个女孩在雨夜街道撑伞。", "T2VA", "自动", "自动")

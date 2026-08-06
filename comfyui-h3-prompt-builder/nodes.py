@@ -58,6 +58,18 @@ def read_text_file(path):
         return f.read().strip()
 
 
+def normalize_endpoint(base_url):
+    """把用户填的接口地址规范化为 Chat Completions 端点。"""
+    url = (base_url or "").strip().rstrip("/")
+    if not url:
+        return url
+    if url.endswith("/chat/completions"):
+        return url
+    if url.endswith("/v1"):
+        return url + "/chat/completions"
+    return url + "/chat/completions"
+
+
 def build_system_prompt(style, output_language):
     """组装 LLM 模式 system prompt：官方规则 + 风格规则 + 语言要求。"""
     parts = []
@@ -83,6 +95,7 @@ def build_system_prompt(style, output_language):
 
 def call_llm(base_url, api_key, model, system_prompt, user_text, temperature=0.4, max_tokens=8192, timeout=120):
     """调用 OpenAI 兼容 Chat Completions 接口，返回助手文本。"""
+    base_url = normalize_endpoint(base_url)
     payload = {
         "model": model,
         "messages": [

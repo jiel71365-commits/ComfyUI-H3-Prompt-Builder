@@ -20,6 +20,7 @@
 - `duration` / `aspect_ratio`：目标时长与画幅，默认自动。
 - `output_language`：默认英文结构+保留台词原文，可选全中文/全英文。
 - `api_key` / `model` / `base_url`：留空使用 `config.json` 默认值（默认模型 `deepseek-v4-flash`，默认端点 `https://api.deepseek.com/chat/completions`）。
+- `base_url` 填 `https://api.deepseek.com`（不带路径）也可以，插件会自动补全 `/chat/completions`；留空则用 config.json 默认值。
 
 输出 `h3_prompt`（STRING）接到 H3 节点的 prompt 输入即可。
 
