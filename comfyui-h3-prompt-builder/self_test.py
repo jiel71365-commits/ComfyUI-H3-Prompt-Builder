@@ -241,5 +241,37 @@ class TestManjuSystemPrompt(unittest.TestCase):
         self.assertIn("本集预设", sp)
 
 
+class TestManjuNodes(unittest.TestCase):
+    def test_input_types(self):
+        for cls in (
+            manju_nodes.ManjuPreset,
+            manju_nodes.ManjuScriptToStoryboard,
+            manju_nodes.ManjuResourceMapping,
+            manju_nodes.ManjuShotPrompt,
+        ):
+            it = cls.INPUT_TYPES()
+            self.assertIn("required", it)
+
+    def test_preset_node(self):
+        node = manju_nodes.ManjuPreset()
+        out = node.build("古风", "9:16", "120", "自动（英文结构+保留原文）")
+        self.assertIn("duration", out[0])
+
+    def test_mapping_node(self):
+        node = manju_nodes.ManjuResourceMapping()
+        out = node.build("角色A=图1", "")
+        self.assertIn("角色A", out[0])
+
+    def test_storyboard_node_empty_script(self):
+        node = manju_nodes.ManjuScriptToStoryboard()
+        out = node.build("", "{}", api_key="")
+        self.assertIn("请输入剧本", out[0])
+
+    def test_shot_prompt_node_bad_json(self):
+        node = manju_nodes.ManjuShotPrompt()
+        out = node.build("not json", "{}", 1, api_key="")
+        self.assertIn("错误：", out[0])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
