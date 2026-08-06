@@ -40,7 +40,7 @@ def load_config():
     }
     if os.path.exists(CONFIG_PATH):
         try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
                 cfg = json.load(f)
             for key in defaults:
                 cfg.setdefault(key, defaults[key])
@@ -115,9 +115,15 @@ def call_llm(base_url, api_key, model, system_prompt, user_text, temperature=0.4
     except urllib.error.URLError as err:
         raise RuntimeError("网络错误: %s" % (err.reason,))
     try:
-        return body["choices"][0]["message"]["content"].strip()
+        content = body["choices"][0]["message"].get("content") or ""
+        content = content.strip()
     except (KeyError, IndexError, TypeError):
         raise RuntimeError("响应格式异常: " + json.dumps(body, ensure_ascii=False)[:300])
+    if not content:
+        raise RuntimeError(
+            "模型未返回正文（推理型模型可能占满了 max_tokens，请调大 config.json 的 max_tokens）"
+        )
+    return content
 
 
 def alignment_line(generation_mode, duration):

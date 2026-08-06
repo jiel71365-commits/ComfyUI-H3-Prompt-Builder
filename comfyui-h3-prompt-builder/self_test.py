@@ -3,6 +3,7 @@
 import os
 import sys
 import unittest
+import unittest.mock
 
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, PLUGIN_DIR)
@@ -83,7 +84,9 @@ class TestNodeInterface(unittest.TestCase):
 
     def test_llm_without_key_returns_message(self):
         node = nodes.H3PromptBuilder()
-        out = node.build("一个女孩撑伞。", "LLM 改写", "auto", "通用", "自动", "自动", "自动（英文结构+保留原文）", api_key="")
+        fake_config = {"api_key": "", "model": "x", "base_url": "x", "temperature": 0.4, "max_tokens": 8192}
+        with unittest.mock.patch.object(nodes, "load_config", return_value=fake_config):
+            out = node.build("一个女孩撑伞。", "LLM 改写", "auto", "通用", "自动", "自动", "自动（英文结构+保留原文）", api_key="")
         self.assertIn("未配置 API Key", out[0])
 
 
