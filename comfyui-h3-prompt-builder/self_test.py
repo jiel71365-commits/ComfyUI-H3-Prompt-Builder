@@ -248,6 +248,7 @@ class TestManjuNodes(unittest.TestCase):
             manju_nodes.ManjuScriptToStoryboard,
             manju_nodes.ManjuResourceMapping,
             manju_nodes.ManjuShotPrompt,
+            manju_nodes.ManjuLlmConfig,
         ):
             it = cls.INPUT_TYPES()
             self.assertIn("required", it)
@@ -307,6 +308,81 @@ class TestResolveLlm(unittest.TestCase):
     def test_invalid_llm_config_warns(self):
         _, _, _, _, _, warn = manju_nodes.resolve_llm_config("", "", "", "not json")
         self.assertIn("llm_config", warn)
+
+
+class TestAutoSuggest(unittest.TestCase):
+    ASSETS = json.dumps({
+        "characters": [{"id": "角色A", "description": "黑发少年", "shots": [1]}],
+        "scenes": [{"id": "场景A", "description": "教室", "shots": [1]}],
+        "props": [{"id": "道具A", "description": "盒子", "shots": [1]}],
+    }, ensure_ascii=False)
+
+    def test_auto_suggest_mapping(self):
+        node = manju_nodes.ManjuResourceMapping()
+        out = node.build("", self.ASSETS, False)
+        mapping = json.loads(out[0])
+        self.assertEqual(mapping["角色A"], 1)
+        self.assertEqual(mapping["场景A"], 2)
+        self.assertEqual(mapping["道具A"], 3)
+        self.assertIn("角色A=图1", out[1])
+
+    def test_image_prompts(self):
+        node = manju_nodes.ManjuResourceMapping()
+        out = node.build("", self.ASSETS, True)
+        self.assertIn("角色A", out[2])
+        self.assertIn("黑发少年", out[2])
+        self.assertIn("设定图", out[2])
+
+
+class TestManjuV2Nodes(unittest.TestCase):
+    def test_fixed_storyboard_skips_llm(self):
+        node = manju_nodes.ManjuScriptToStoryboard()
+        with unittest.mock.patch.object(manju_nodes, "call_llm", side_effect=AssertionError("不应调用 LLM")):
+            out = node.build("随便的剧本", "{}", api_key="", model="", base_url="",
+                             llm_config="", fixed_storyboard_json=TestManjuRefs.STORYBOARD)
+        sb = json.loads(out[0])
+        self.assertEqual(len(sb["shots"]), 2)
+        self.assertEqual(sb["_policy"], "禁字幕+无BGM")
+        assets = json.loads(out[1])
+        self.assertEqual([c["id"] for c in assets["characters"]], ["角色A", "角色B"])
+
+    def test_export_all(self):
+        node = manju_nodes.ManjuShotPrompt()
+        with unittest.mock.patch.object(manju_nodes, "call_llm", return_value="MOCK_PROMPT"):
+            out = node.build(TestManjuRefs.STORYBOARD, TestManjuRefs.MAPPING, 1,
+                             api_key="k", export_all=True)
+        self.assertIn("=== Shot 1 ===", out[0])
+        self.assertIn("=== Shot 2 ===", out[0])
+        self.assertIn("MOCK_PROMPT", out[0])
+        self.assertIn("Shot 1 接线：", out[1])
+
+    def test_policy_injected(self):
+        sb = json.loads(TestManjuRefs.STORYBOARD)
+        sb["_policy"] = "仅禁字幕"
+        sb_json = json.dumps(sb, ensure_ascii=False)
+        captured = []
+
+        def fake_llm(*args, **kwargs):
+            captured.append(args[3])
+            return "P"
+
+        node = manju_nodes.ManjuShotPrompt()
+        with unittest.mock.patch.object(manju_nodes, "call_llm", side_effect=fake_llm):
+            node.build(sb_json, TestManjuRefs.MAPPING, 1, api_key="k")
+        self.assertIn("仅禁字幕", captured[0])
+
+    def test_llm_config_node(self):
+        node = manju_nodes.ManjuLlmConfig()
+        out = node.build("", "m1", "https://x", "")
+        cfg = json.loads(out[0])
+        self.assertEqual(cfg["model"], "m1")
+        self.assertNotIn("temperature", cfg)
+        out2 = node.build("", "m1", "https://x", "0.3")
+        self.assertEqual(json.loads(out2[0])["temperature"], 0.3)
+
+    def test_shot_index_step(self):
+        it = manju_nodes.ManjuShotPrompt.INPUT_TYPES()
+        self.assertEqual(it["required"]["shot_index"][1].get("step"), 1)
 
 
 if __name__ == "__main__":

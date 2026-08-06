@@ -1,4 +1,5 @@
 from .manju_nodes import (
+    ManjuLlmConfig,
     ManjuPreset,
     ManjuResourceMapping,
     ManjuScriptToStoryboard,
@@ -12,6 +13,7 @@ NODE_CLASS_MAPPINGS = {
     "ManjuScriptToStoryboard": ManjuScriptToStoryboard,
     "ManjuResourceMapping": ManjuResourceMapping,
     "ManjuShotPrompt": ManjuShotPrompt,
+    "ManjuLlmConfig": ManjuLlmConfig,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -20,6 +22,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ManjuScriptToStoryboard": "漫剧：剧本→分镜",
     "ManjuResourceMapping": "漫剧：资源映射",
     "ManjuShotPrompt": "漫剧：分镜→镜头提示词",
+    "ManjuLlmConfig": "漫剧：LLM 配置",
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]

@@ -306,6 +306,7 @@ class ManjuPreset:
                 "aspect_ratio": (ASPECT_RATIOS, {"default": "9:16"}),
                 "duration": (DURATIONS, {"default": "自动"}),
                 "output_language": (OUTPUT_LANGUAGES, {"default": "自动（英文结构+保留原文）"}),
+                "audio_text_policy": (AUDIO_TEXT_POLICIES, {"default": DEFAULT_MANJU_POLICY}),
             }
         }
 
@@ -314,35 +315,68 @@ class ManjuPreset:
     FUNCTION = "build"
     CATEGORY = "MiniMax H3 / 漫剧"
 
-    def build(self, style, aspect_ratio, duration, output_language):
-        return (build_preset_json(style, aspect_ratio, duration, output_language),)
+    def build(self, style, aspect_ratio, duration, output_language, audio_text_policy=DEFAULT_MANJU_POLICY):
+        return (build_preset_json(style, aspect_ratio, duration, output_language, audio_text_policy),)
 
 
 class ManjuResourceMapping:
-    """漫剧资源映射：本地解析映射文本。"""
+    """漫剧资源映射：解析映射文本；留空时按资源清单自动建议。"""
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "mapping_text": ("STRING", {"multiline": True, "default": "角色A=图1\n场景A=图3"}),
+                "mapping_text": ("STRING", {"multiline": True, "default": ""}),
             },
             "optional": {
                 "assets_json": ("STRING", {"multiline": True, "default": ""}),
+                "generate_image_prompts": ("BOOLEAN", {"default": False}),
             },
         }
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("mapping_json",)
+    RETURN_TYPES = ("STRING", "STRING", "STRING")
+    RETURN_NAMES = ("mapping_json", "suggested_mapping_text", "image_prompts")
     FUNCTION = "build"
     CATEGORY = "MiniMax H3 / 漫剧"
 
-    def build(self, mapping_text, assets_json=""):
-        return (parse_mapping_text(mapping_text, assets_json),)
+    def build(self, mapping_text, assets_json="", generate_image_prompts=False):
+        suggested = ""
+        image_prompts = ""
+        text = (mapping_text or "").strip()
+        assets = {}
+        assets_valid = False
+        if assets_json and assets_json.strip():
+            try:
+                assets = json.loads(assets_json)
+                assets_valid = True
+            except Exception:
+                assets_valid = False
+        if not text and assets_valid:
+            lines = []
+            mapping = {}
+            number = 1
+            for category in ("characters", "scenes", "props"):
+                for item in assets.get(category, []):
+                    item_id = item.get("id", "")
+                    if not item_id:
+                        continue
+                    mapping[item_id] = number
+                    lines.append("%s=图%d" % (item_id, number))
+                    number += 1
+            if lines:
+                suggested = "\n".join(lines)
+                mapping_json = parse_mapping_text(suggested, assets_json)
+            else:
+                mapping_json = parse_mapping_text("", assets_json)
+        else:
+            mapping_json = parse_mapping_text(text, assets_json)
+        if generate_image_prompts and assets_valid:
+            image_prompts = _build_image_prompts(assets)
+        return (mapping_json, suggested, image_prompts)
 
 
 class ManjuScriptToStoryboard:
-    """漫剧：剧本 → 分镜剧本 + 资源清单 + 摘要。"""
+    """漫剧：剧本 → 分镜剧本 + 资源清单 + 摘要；支持固定分镜复用（跳过 LLM）。"""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -355,6 +389,8 @@ class ManjuScriptToStoryboard:
                 "api_key": ("STRING", {"default": ""}),
                 "model": ("STRING", {"default": ""}),
                 "base_url": ("STRING", {"default": ""}),
+                "llm_config": ("STRING", {"multiline": True, "default": ""}),
+                "fixed_storyboard_json": ("STRING", {"multiline": True, "default": ""}),
             },
         }
 
@@ -363,19 +399,32 @@ class ManjuScriptToStoryboard:
     FUNCTION = "build"
     CATEGORY = "MiniMax H3 / 漫剧"
 
-    def build(self, script, preset_json, api_key="", model="", base_url=""):
+    def build(self, script, preset_json, api_key="", model="", base_url="", llm_config="", fixed_storyboard_json=""):
+        policy = _policy_from_preset(preset_json)
+        if (fixed_storyboard_json or "").strip():
+            try:
+                storyboard = json.loads(fixed_storyboard_json)
+            except Exception:
+                return ("固定分镜 JSON 不是合法 JSON。", "{}", "")
+            if "_policy" not in storyboard:
+                storyboard["_policy"] = policy
+            storyboard_json = json.dumps(storyboard, ensure_ascii=False, indent=2)
+            assets_json = derive_assets_from_storyboard(storyboard_json)
+            return (storyboard_json, assets_json, _build_summary(storyboard))
+
         script = (script or "").strip()
         if not script:
             return ("请输入剧本。", "{}", "")
-        key, model_name, endpoint, config = _llm_args(api_key, model, base_url)
+        key, model_name, endpoint, temperature, config, warning = resolve_llm_config(api_key, model, base_url, llm_config)
         if not key:
-            return ("未配置 API Key：请在节点 api_key 输入框或 config.json 中填写。", "{}", "")
+            return ("未配置 API Key：请在 LLM 配置节点、节点 api_key 输入框或 config.json 中填写。", "{}", "")
         extra = "【本集预设】\n" + (preset_json or "{}") + "\n\n【剧本原文】\n" + script
         system = build_manju_system_prompt("manju_storyboard.txt", extra)
+        temp = temperature if temperature is not None else config.get("manju_temperature", 0.2)
         try:
             raw = call_llm(
                 endpoint, key, model_name, system, "请根据以上剧本与预设生成分镜 JSON。",
-                temperature=config.get("temperature", 0.4),
+                temperature=temp,
                 max_tokens=config.get("max_tokens", 32768),
             )
         except Exception as exc:
@@ -384,13 +433,17 @@ class ManjuScriptToStoryboard:
         if parsed is None:
             return ("分镜 JSON 解析失败，请重试。模型输出：%s" % raw[:300], "{}", "")
         storyboard = parsed.get("storyboard", parsed)
+        storyboard["_policy"] = policy
         storyboard_json = json.dumps(storyboard, ensure_ascii=False, indent=2)
         assets_json = json.dumps(parsed.get("assets", {}), ensure_ascii=False, indent=2)
-        return (storyboard_json, assets_json, _build_summary(storyboard))
+        summary = _build_summary(storyboard)
+        if warning:
+            summary = warning + "\n" + summary
+        return (storyboard_json, assets_json, summary)
 
 
 class ManjuShotPrompt:
-    """漫剧：分镜 → 该镜 H3 提示词 + 接线说明。"""
+    """漫剧：分镜 → 该镜 H3 提示词 + 接线说明；支持导出全部。"""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -398,12 +451,14 @@ class ManjuShotPrompt:
             "required": {
                 "storyboard_json": ("STRING", {"multiline": True, "default": ""}),
                 "mapping_json": ("STRING", {"multiline": True, "default": "{}"}),
-                "shot_index": ("INT", {"default": 1, "min": 1, "max": 999}),
+                "shot_index": ("INT", {"default": 1, "min": 1, "max": 999, "step": 1}),
             },
             "optional": {
                 "api_key": ("STRING", {"default": ""}),
                 "model": ("STRING", {"default": ""}),
                 "base_url": ("STRING", {"default": ""}),
+                "llm_config": ("STRING", {"multiline": True, "default": ""}),
+                "export_all": ("BOOLEAN", {"default": False}),
             },
         }
 
@@ -412,26 +467,94 @@ class ManjuShotPrompt:
     FUNCTION = "build"
     CATEGORY = "MiniMax H3 / 漫剧"
 
-    def build(self, storyboard_json, mapping_json, shot_index, api_key="", model="", base_url=""):
+    def build(self, storyboard_json, mapping_json, shot_index, api_key="", model="", base_url="", llm_config="", export_all=False):
         try:
-            refs = compute_shot_refs(storyboard_json, mapping_json, shot_index)
+            storyboard = _load_json(storyboard_json, "storyboard_json")
+            _load_json(mapping_json, "mapping_json")
         except ValueError as exc:
             return ("错误：%s" % (exc,), "")
-        wiring_note = build_wiring_note(storyboard_json, mapping_json, shot_index)
-        key, model_name, endpoint, config = _llm_args(api_key, model, base_url)
+        policy = storyboard.get("_policy") or DEFAULT_MANJU_POLICY
+        key, model_name, endpoint, temperature, config, warning = resolve_llm_config(api_key, model, base_url, llm_config)
         if not key:
-            return ("未配置 API Key：请在节点 api_key 输入框或 config.json 中填写。", wiring_note)
-        extra = "【本镜数据】\n" + json.dumps(
-            {"shot": refs["shot"], "tags": refs["tags"], "missing": refs["missing"]},
-            ensure_ascii=False, indent=2,
-        )
-        system = build_manju_system_prompt("manju_shot_prompt.txt", extra)
-        try:
+            return ("未配置 API Key：请在 LLM 配置节点、节点 api_key 输入框或 config.json 中填写。", "")
+        temp = temperature if temperature is not None else config.get("temperature", 0.4)
+
+        def gen_one(idx):
+            refs = compute_shot_refs(storyboard_json, mapping_json, idx)
+            wiring = build_wiring_note(storyboard_json, mapping_json, idx)
+            extra = "【本镜数据】\n" + json.dumps(
+                {"shot": refs["shot"], "tags": refs["tags"], "missing": refs["missing"], "policy": policy},
+                ensure_ascii=False, indent=2,
+            )
+            system = build_manju_system_prompt("manju_shot_prompt.txt", extra)
             prompt = call_llm(
                 endpoint, key, model_name, system, "请按规则生成该镜头的 H3 提示词。",
-                temperature=config.get("temperature", 0.4),
+                temperature=temp,
                 max_tokens=config.get("max_tokens", 32768),
             )
+            return prompt, wiring
+
+        if export_all:
+            parts_prompt = []
+            parts_wiring = []
+            error_lines = []
+            for idx in range(1, len(storyboard.get("shots", [])) + 1):
+                try:
+                    prompt, wiring = gen_one(idx)
+                except Exception as exc:
+                    error_lines.append("Shot %d 失败：%s" % (idx, exc))
+                    break
+                parts_prompt.append("=== Shot %d ===\n%s" % (idx, prompt))
+                parts_wiring.append("=== Shot %d ===\n%s" % (idx, wiring))
+            if error_lines:
+                parts_prompt.append("\n".join(error_lines))
+                parts_wiring.append("\n".join(error_lines))
+            all_prompt = "\n\n".join(parts_prompt)
+            all_wiring = "\n\n".join(parts_wiring)
+            if warning:
+                all_prompt = warning + "\n" + all_prompt
+            return (all_prompt, all_wiring)
+
+        try:
+            prompt, wiring = gen_one(shot_index)
+        except ValueError as exc:
+            return ("错误：%s" % (exc,), "")
         except Exception as exc:
-            return ("LLM 调用失败：%s" % (exc,), wiring_note)
-        return (prompt, wiring_note)
+            return ("LLM 调用失败：%s" % (exc,), "")
+        if warning:
+            wiring = warning + "\n" + wiring
+        return (prompt, wiring)
+
+
+class ManjuLlmConfig:
+    """漫剧 LLM 配置：填一次，输出 JSON 供其他节点复用。"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "api_key": ("STRING", {"default": ""}),
+                "model": ("STRING", {"default": ""}),
+                "base_url": ("STRING", {"default": ""}),
+                "temperature": ("STRING", {"default": ""}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("llm_config",)
+    FUNCTION = "build"
+    CATEGORY = "MiniMax H3 / 漫剧"
+
+    def build(self, api_key, model, base_url, temperature):
+        cfg = {
+            "api_key": (api_key or "").strip(),
+            "model": (model or "").strip(),
+            "base_url": (base_url or "").strip(),
+        }
+        temp_text = (temperature or "").strip()
+        if temp_text:
+            try:
+                cfg["temperature"] = float(temp_text)
+            except Exception:
+                pass
+        return (json.dumps(cfg, ensure_ascii=False, indent=2),)
