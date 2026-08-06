@@ -39,6 +39,16 @@
 - 镜头数超过 1 时，改「镜头序号」逐镜生成。
 - 全部输出用 Show Text / Preview Text 查看。
 
+### v2 新功能
+
+- **漫剧：LLM 配置**：api_key/model/base_url/temperature 填一次输出 JSON，接到剧本→分镜与分镜→镜头提示词的 `llm_config` 输入即可复用；优先级：节点单独输入 > llm_config > config.json。
+- **音频与文字策略**（预设节点）：默认「禁字幕+无BGM」，镜头提示词强制 `non_diegetic_music: N/A` 且画面无字幕/文字/水印。
+- **固定分镜复用**：剧本→分镜节点的 `fixed_storyboard_json` 粘贴已有分镜后跳过 LLM（不花钱、前后一致），资源清单自动反推。
+- **导出全部**：分镜→镜头提示词节点打开 `export_all` 一次性输出全部镜头的提示词与接线说明。
+- **自动建议映射**：资源映射节点的 `mapping_text` 留空时，按资源清单自动生成 `角色A=图1` 建议（输出在 `suggested_mapping_text`）。
+- **设定图提示词**：资源映射节点打开 `generate_image_prompts`，输出角色/场景/道具的设定图提示词（离线）。
+- **分镜低温度**：config.json 的 `manju_temperature: 0.2` 降低分镜随机性；`shot_index` 支持步进。
+
 ## R2V 提示
 
 - 提示词里的 `<Picture 1>` `<Video 1>` `<Audio 1>` 标签顺序，必须和你在 R2V 节点上连接参考素材的顺序一致。
