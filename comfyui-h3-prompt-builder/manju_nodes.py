@@ -357,6 +357,7 @@ class ManjuResourceMapping:
                 "assets_json": ("STRING", {"multiline": True, "default": ""}),
                 "generate_image_prompts": ("BOOLEAN", {"default": False}),
                 "storyboard_json": ("STRING", {"multiline": True, "default": ""}),
+                "shot_index": ("INT", {"default": 0, "min": 0, "max": 999}),
             },
         }
 
@@ -365,7 +366,7 @@ class ManjuResourceMapping:
     FUNCTION = "build"
     CATEGORY = "MiniMax H3 / 漫剧"
 
-    def build(self, mapping_text, assets_json="", generate_image_prompts=False, storyboard_json=""):
+    def build(self, mapping_text, assets_json="", generate_image_prompts=False, storyboard_json="", shot_index=0):
         suggested = ""
         image_prompts = ""
         text = (mapping_text or "").strip()
@@ -401,6 +402,21 @@ class ManjuResourceMapping:
         per_shot_wiring = ""
         if storyboard_json and storyboard_json.strip():
             per_shot_wiring = build_per_shot_wiring(storyboard_json, mapping_json)
+        if shot_index > 0 and storyboard_json and storyboard_json.strip():
+            try:
+                data = compute_shot_refs(storyboard_json, mapping_json, shot_index)
+            except ValueError:
+                per_shot_wiring = "错误：镜头序号超出范围"
+            else:
+                filtered = {role: num for num, role in data["refs"]}
+                mapping_json = json.dumps(filtered, ensure_ascii=False, indent=2) if filtered else "{}"
+                suggested = "\n".join("%s=图%d" % (role, num) for num, role in data["refs"])
+                parts = []
+                for i, (num, role) in enumerate(data["refs"], 1):
+                    parts.append("<Picture %d>=%s（图库第 %d 张）" % (i, role, num))
+                if data["missing"]:
+                    parts.append("缺映射：" + "、".join(data["missing"]))
+                per_shot_wiring = "Shot %d: %s" % (shot_index, "、".join(parts))
         return (mapping_json, suggested, image_prompts, per_shot_wiring)
 
 

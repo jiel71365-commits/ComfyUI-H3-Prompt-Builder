@@ -454,5 +454,38 @@ class TestManjuV2Nodes(unittest.TestCase):
         self.assertEqual(out[3], "")
 
 
+class TestShotSelect(unittest.TestCase):
+    def test_filtered_mapping_shot1(self):
+        node = manju_nodes.ManjuResourceMapping()
+        out = node.build("", TestAutoSuggest.ASSETS, False, TestManjuRefs.STORYBOARD, 1)
+        mapping = json.loads(out[0])
+        self.assertEqual(mapping, {"角色A": 1, "场景A": 2})
+        self.assertIn("角色A=图1", out[1])
+        self.assertNotIn("角色B", out[1])
+        self.assertIn("Shot 1:", out[3])
+        self.assertNotIn("Shot 2:", out[3])
+
+    def test_default_zero_full(self):
+        node = manju_nodes.ManjuResourceMapping()
+        out = node.build("", TestAutoSuggest.ASSETS, False, TestManjuRefs.STORYBOARD, 0)
+        self.assertIn("Shot 1:", out[3])
+        self.assertIn("Shot 2:", out[3])
+
+    def test_out_of_range(self):
+        node = manju_nodes.ManjuResourceMapping()
+        out = node.build("", TestAutoSuggest.ASSETS, False, TestManjuRefs.STORYBOARD, 99)
+        self.assertIn("错误：镜头序号超出范围", out[3])
+        self.assertIn("道具A", out[0])
+
+    def test_image_prompts_unchanged(self):
+        node = manju_nodes.ManjuResourceMapping()
+        out = node.build("", TestAutoSuggest.ASSETS, True, TestManjuRefs.STORYBOARD, 1)
+        self.assertIn("道具A", out[2])
+
+    def test_input_types_has_shot_index(self):
+        it = manju_nodes.ManjuResourceMapping.INPUT_TYPES()
+        self.assertEqual(it["optional"]["shot_index"][1].get("default"), 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
