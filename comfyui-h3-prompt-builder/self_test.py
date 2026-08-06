@@ -1,5 +1,6 @@
 """离线自检：不联网，检查插件结构与核心逻辑。用法：python self_test.py"""
 
+import json
 import os
 import sys
 import unittest
@@ -47,6 +48,50 @@ class TestEndpoint(unittest.TestCase):
             "https://api.deepseek.com/chat/completions",
         )
         self.assertEqual(nodes.normalize_endpoint(""), "")
+
+
+class TestCallLlmRetry(unittest.TestCase):
+    def _fake_urlopen(self, responses):
+        calls = {"n": 0}
+
+        def fake(request, timeout=120):
+            calls["n"] += 1
+            body = responses[min(calls["n"], len(responses)) - 1]
+
+            class FakeResp:
+                def read(self):
+                    return json.dumps(body).encode("utf-8")
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    return False
+
+            return FakeResp()
+
+        return fake, calls
+
+    def test_retries_when_reasoning_exhausts_tokens(self):
+        fake, calls = self._fake_urlopen([
+            {"choices": [{"message": {"content": ""}, "finish_reason": "length"}]},
+            {"choices": [{"message": {"content": "done"}, "finish_reason": "stop"}]},
+        ])
+        with unittest.mock.patch.object(nodes.urllib.request, "urlopen", side_effect=fake):
+            result = nodes.call_llm("https://api.deepseek.com", "k", "m", "sys", "user", max_tokens=8192)
+        self.assertEqual(result, "done")
+        self.assertEqual(calls["n"], 2)
+
+    def test_raises_when_still_empty(self):
+        fake, calls = self._fake_urlopen([
+            {"choices": [{"message": {"content": ""}, "finish_reason": "length"}]},
+            {"choices": [{"message": {"content": ""}, "finish_reason": "length"}]},
+        ])
+        with unittest.mock.patch.object(nodes.urllib.request, "urlopen", side_effect=fake):
+            with self.assertRaises(RuntimeError) as ctx:
+                nodes.call_llm("https://api.deepseek.com", "k", "m", "sys", "user", max_tokens=8192)
+        self.assertIn("未返回正文", str(ctx.exception))
+        self.assertEqual(calls["n"], 2)
 
 
 class TestTemplate(unittest.TestCase):

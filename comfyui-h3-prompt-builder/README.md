@@ -45,10 +45,11 @@ python self_test.py
 | model | deepseek-v4-flash | 模型名 |
 | api_key | 空 | API Key（也可在节点输入框填） |
 | temperature | 0.4 | 采样温度 |
-| max_tokens | 8192 | 最大输出 token |
+| max_tokens | 32768 | 最大输出 token（含推理 token；推理型模型建议不低于 16384） |
 
 ## 常见问题
 
 - **提示「未配置 API Key」**：在节点 `api_key` 输入框或 `config.json` 里填 key。
 - **提示「LLM 调用失败：HTTP 404」**：检查 `model`/`base_url` 是否正确（中转站模型名可能不同）。
+- **提示「模型未返回正文」**：推理过程占满了 `max_tokens`。插件会自动加倍重试一次，仍失败就调大 `config.json` 的 `max_tokens`（默认已设为 32768）。
 - **模板骨架模式**：不联网、不花钱，输出的是需要手工补全的骨架。

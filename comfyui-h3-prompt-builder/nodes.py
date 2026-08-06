@@ -36,7 +36,7 @@ def load_config():
         "model": "deepseek-v4-flash",
         "api_key": "",
         "temperature": 0.4,
-        "max_tokens": 8192,
+        "max_tokens": 32768,
     }
     if os.path.exists(CONFIG_PATH):
         try:
@@ -96,45 +96,57 @@ def build_system_prompt(style, output_language):
 def call_llm(base_url, api_key, model, system_prompt, user_text, temperature=0.4, max_tokens=8192, timeout=120):
     """调用 OpenAI 兼容 Chat Completions 接口，返回助手文本。"""
     base_url = normalize_endpoint(base_url)
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_text},
-        ],
-        "temperature": float(temperature),
-        "max_tokens": int(max_tokens),
-        "stream": False,
-    }
-    request = urllib.request.Request(
-        base_url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + api_key,
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            body = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as err:
-        detail = ""
+    max_tokens = int(max_tokens)
+
+    def post(mt):
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_text},
+            ],
+            "temperature": float(temperature),
+            "max_tokens": mt,
+            "stream": False,
+        }
+        request = urllib.request.Request(
+            base_url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + api_key,
+            },
+            method="POST",
+        )
         try:
-            detail = err.read().decode("utf-8")[:300]
-        except Exception:
-            pass
-        raise RuntimeError("HTTP %s: %s" % (err.code, detail))
-    except urllib.error.URLError as err:
-        raise RuntimeError("网络错误: %s" % (err.reason,))
-    try:
-        content = body["choices"][0]["message"].get("content") or ""
-        content = content.strip()
-    except (KeyError, IndexError, TypeError):
-        raise RuntimeError("响应格式异常: " + json.dumps(body, ensure_ascii=False)[:300])
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as err:
+            detail = ""
+            try:
+                detail = err.read().decode("utf-8")[:300]
+            except Exception:
+                pass
+            raise RuntimeError("HTTP %s: %s" % (err.code, detail))
+        except urllib.error.URLError as err:
+            raise RuntimeError("网络错误: %s" % (err.reason,))
+
+    def extract(body):
+        try:
+            choice = body["choices"][0]
+            content = (choice["message"].get("content") or "").strip()
+            return content, choice.get("finish_reason")
+        except (KeyError, IndexError, TypeError):
+            raise RuntimeError("响应格式异常: " + json.dumps(body, ensure_ascii=False)[:300])
+
+    body = post(max_tokens)
+    content, finish = extract(body)
+    if not content and finish == "length" and max_tokens < 65536:
+        body = post(min(max_tokens * 2, 65536))
+        content, finish = extract(body)
     if not content:
         raise RuntimeError(
-            "模型未返回正文（推理型模型可能占满了 max_tokens，请调大 config.json 的 max_tokens）"
+            "模型未返回正文（finish_reason=%s，推理过程占满了 max_tokens，请调大 config.json 的 max_tokens）" % (finish,)
         )
     return content
 
