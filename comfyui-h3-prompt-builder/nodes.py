@@ -2,6 +2,7 @@
 
 import json
 import os
+import threading
 import urllib.error
 import urllib.request
 
@@ -37,6 +38,7 @@ def load_config():
         "api_key": "",
         "temperature": 0.4,
         "max_tokens": 32768,
+        "thinking_disabled": True,
     }
     if os.path.exists(CONFIG_PATH):
         try:
@@ -97,6 +99,8 @@ def call_llm(base_url, api_key, model, system_prompt, user_text, temperature=0.4
     """调用 OpenAI 兼容 Chat Completions 接口，返回助手文本。"""
     base_url = normalize_endpoint(base_url)
     max_tokens = int(max_tokens)
+    cfg = load_config()
+    thinking_disabled = cfg.get("thinking_disabled", True)
 
     def post(mt):
         payload = {
@@ -109,6 +113,8 @@ def call_llm(base_url, api_key, model, system_prompt, user_text, temperature=0.4
             "max_tokens": mt,
             "stream": False,
         }
+        if thinking_disabled:
+            payload["thinking"] = {"type": "disabled"}
         request = urllib.request.Request(
             base_url,
             data=json.dumps(payload).encode("utf-8"),
@@ -131,6 +137,24 @@ def call_llm(base_url, api_key, model, system_prompt, user_text, temperature=0.4
         except urllib.error.URLError as err:
             raise RuntimeError("网络错误: %s" % (err.reason,))
 
+    def post_with_deadline(mt):
+        holder = {}
+
+        def worker():
+            try:
+                holder["value"] = post(mt)
+            except Exception as exc:
+                holder["error"] = exc
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        thread.join(timeout)
+        if thread.is_alive():
+            raise RuntimeError("请求超时（超过 %d 秒未返回，请重试）" % timeout)
+        if "error" in holder:
+            raise holder["error"]
+        return holder["value"]
+
     def extract(body):
         try:
             choice = body["choices"][0]
@@ -139,14 +163,14 @@ def call_llm(base_url, api_key, model, system_prompt, user_text, temperature=0.4
         except (KeyError, IndexError, TypeError):
             raise RuntimeError("响应格式异常: " + json.dumps(body, ensure_ascii=False)[:300])
 
-    body = post(max_tokens)
+    body = post_with_deadline(max_tokens)
     content, finish = extract(body)
     if not content:
         if finish == "length" and max_tokens < 65536:
-            body = post(min(max_tokens * 2, 65536))
+            body = post_with_deadline(min(max_tokens * 2, 65536))
             content, finish = extract(body)
         else:
-            body = post(max_tokens)
+            body = post_with_deadline(max_tokens)
             content, finish = extract(body)
     if not content:
         if finish == "length":

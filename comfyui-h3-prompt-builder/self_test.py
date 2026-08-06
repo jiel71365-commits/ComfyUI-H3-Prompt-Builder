@@ -104,6 +104,28 @@ class TestCallLlmRetry(unittest.TestCase):
         self.assertEqual(result, "done")
         self.assertEqual(calls["n"], 2)
 
+    def test_thinking_disabled_in_payload(self):
+        captured = {}
+
+        def fake(request, timeout=120):
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+
+            class FakeResp:
+                def read(self):
+                    return json.dumps({"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}).encode("utf-8")
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    return False
+
+            return FakeResp()
+
+        with unittest.mock.patch.object(nodes.urllib.request, "urlopen", side_effect=fake):
+            nodes.call_llm("https://api.deepseek.com", "k", "m", "sys", "user")
+        self.assertEqual(captured["body"]["thinking"], {"type": "disabled"})
+
 
 class TestTemplate(unittest.TestCase):
     def test_t2va(self):
