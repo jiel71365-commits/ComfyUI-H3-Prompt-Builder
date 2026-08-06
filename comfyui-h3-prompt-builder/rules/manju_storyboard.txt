@@ -9,6 +9,7 @@
    - characters：出场角色（id=角色名，description=中文外观/气质描述，shots=出场镜头号数组）
    - scenes：场景（id=场景名，description=中文环境描述，shots=出现镜头号数组）
    - props：道具（id=道具名，description=中文描述，shots=出现镜头号数组）
+   - id 必须使用剧本中的中文原名（如「角色A」「教室」「盒子」），禁止翻译成英文、禁止简化缩写；剧本若使用英文名则保持英文原名。
 2. 按时间轴拆分镜头：单镜 2–6 秒；镜头数 × 平均时长 ≈ 目标时长；最后一镜结束时间 = 目标时长；时间范围连续无空档、无重叠。
 3. 每个镜头填写：shot_id（从1递增）、time_range（如 "0:00-0:05"）、duration（秒）、scene（场景id）、characters（出场角色id数组）、props（出场道具id数组）、shot_size（景别：特写/近景/中近景/中景/全景/大远景）、camera（机位与运镜，用：固定镜头/推近/拉远/横移/摇摄/跟随/手持微晃 等）、action（画面内容，写实可见的动作）、dialogue（台词原文，无则空字符串）、sfx（音效）、mood（情绪/节奏）、continuity（{"start": 起始状态, "end": 结束状态锁定}）。
 
