@@ -396,6 +396,16 @@ class TestManjuV2Nodes(unittest.TestCase):
         it = manju_nodes.ManjuShotPrompt.INPUT_TYPES()
         self.assertEqual(it["required"]["shot_index"][1].get("step"), 1)
 
+    def test_per_shot_wiring_output(self):
+        node = manju_nodes.ManjuResourceMapping()
+        out = node.build("", TestAutoSuggest.ASSETS, False, TestManjuRefs.STORYBOARD)
+        self.assertIn("Shot 1:", out[3])
+
+    def test_per_shot_wiring_empty_without_storyboard(self):
+        node = manju_nodes.ManjuResourceMapping()
+        out = node.build("", TestAutoSuggest.ASSETS, False)
+        self.assertEqual(out[3], "")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

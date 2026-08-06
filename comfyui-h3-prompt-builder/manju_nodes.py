@@ -356,15 +356,16 @@ class ManjuResourceMapping:
             "optional": {
                 "assets_json": ("STRING", {"multiline": True, "default": ""}),
                 "generate_image_prompts": ("BOOLEAN", {"default": False}),
+                "storyboard_json": ("STRING", {"multiline": True, "default": ""}),
             },
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING")
-    RETURN_NAMES = ("mapping_json", "suggested_mapping_text", "image_prompts")
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("mapping_json", "suggested_mapping_text", "image_prompts", "per_shot_wiring")
     FUNCTION = "build"
     CATEGORY = "MiniMax H3 / 漫剧"
 
-    def build(self, mapping_text, assets_json="", generate_image_prompts=False):
+    def build(self, mapping_text, assets_json="", generate_image_prompts=False, storyboard_json=""):
         suggested = ""
         image_prompts = ""
         text = (mapping_text or "").strip()
@@ -397,7 +398,10 @@ class ManjuResourceMapping:
             mapping_json = parse_mapping_text(text, assets_json)
         if generate_image_prompts and assets_valid:
             image_prompts = _build_image_prompts(assets)
-        return (mapping_json, suggested, image_prompts)
+        per_shot_wiring = ""
+        if storyboard_json and storyboard_json.strip():
+            per_shot_wiring = build_per_shot_wiring(storyboard_json, mapping_json)
+        return (mapping_json, suggested, image_prompts, per_shot_wiring)
 
 
 class ManjuScriptToStoryboard:
