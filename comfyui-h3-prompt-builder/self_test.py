@@ -67,5 +67,25 @@ class TestSystemPrompt(unittest.TestCase):
         self.assertIn("中文", sp)
 
 
+class TestNodeInterface(unittest.TestCase):
+    def test_input_types(self):
+        it = nodes.H3PromptBuilder.INPUT_TYPES()
+        self.assertIn("required", it)
+        self.assertIn("text", it["required"])
+        self.assertIn("mode", it["required"])
+        self.assertIn("optional", it)
+        self.assertIn("api_key", it["optional"])
+
+    def test_template_dispatch(self):
+        node = nodes.H3PromptBuilder()
+        out = node.build("一只猫在窗台上晒太阳。", "模板骨架", "T2VA", "通用", "自动", "自动", "自动（英文结构+保留原文）")
+        self.assertIn("integrated_multimodal_description", out[0])
+
+    def test_llm_without_key_returns_message(self):
+        node = nodes.H3PromptBuilder()
+        out = node.build("一个女孩撑伞。", "LLM 改写", "auto", "通用", "自动", "自动", "自动（英文结构+保留原文）", api_key="")
+        self.assertIn("未配置 API Key", out[0])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

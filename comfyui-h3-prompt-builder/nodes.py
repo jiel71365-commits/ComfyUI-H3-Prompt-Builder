@@ -180,3 +180,61 @@ def build_template(text, generation_mode, duration, aspect_ratio):
     if line:
         return header + line + "\n\n" + body
     return header + body
+
+
+class H3PromptBuilder:
+    """ComfyUI 节点：输入 text，输出 H3 提示词。"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "text": ("STRING", {"multiline": True, "default": "描述需求：主体、场景、动作、风格；如有参考素材请写明每个素材的用途（例如：图1是人物参考，视频1是动作参考）。"}),
+                "mode": (MODES, {"default": "LLM 改写"}),
+                "generation_mode": (GENERATION_MODES, {"default": "auto"}),
+                "style": (list(STYLE_KEYS.keys()), {"default": "通用"}),
+                "duration": (DURATIONS, {"default": "自动"}),
+                "aspect_ratio": (ASPECT_RATIOS, {"default": "自动"}),
+                "output_language": (OUTPUT_LANGUAGES, {"default": "自动（英文结构+保留原文）"}),
+            },
+            "optional": {
+                "api_key": ("STRING", {"default": ""}),
+                "model": ("STRING", {"default": ""}),
+                "base_url": ("STRING", {"default": ""}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("h3_prompt",)
+    FUNCTION = "build"
+    CATEGORY = "MiniMax H3"
+
+    def build(self, text, mode, generation_mode, style, duration, aspect_ratio, output_language, api_key="", model="", base_url=""):
+        if mode == "LLM 改写":
+            return self._build_llm(text, style, output_language, api_key, model, base_url)
+        return (build_template(text, generation_mode, duration, aspect_ratio),)
+
+    def _build_llm(self, text, style, output_language, api_key, model, base_url):
+        text = (text or "").strip()
+        if not text:
+            return ("请输入需求文本。",)
+        config = load_config()
+        key = (api_key or "").strip() or config.get("api_key", "")
+        if not key:
+            return ("未配置 API Key：请在节点 api_key 输入框或 config.json 中填写。",)
+        model_name = (model or "").strip() or config.get("model", "deepseek-v4-flash")
+        endpoint = (base_url or "").strip() or config.get("base_url", "https://api.deepseek.com/chat/completions")
+        system_prompt = build_system_prompt(style, output_language)
+        try:
+            output = call_llm(
+                endpoint,
+                key,
+                model_name,
+                system_prompt,
+                text,
+                temperature=config.get("temperature", 0.4),
+                max_tokens=config.get("max_tokens", 8192),
+            )
+            return (output,)
+        except Exception as exc:
+            return ("LLM 调用失败：%s" % (exc,),)
