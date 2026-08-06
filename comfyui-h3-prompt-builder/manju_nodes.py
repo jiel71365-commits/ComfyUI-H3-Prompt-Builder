@@ -153,7 +153,7 @@ def build_wiring_note(storyboard_json, mapping_json, shot_index):
     data = compute_shot_refs(storyboard_json, mapping_json, shot_index)
     parts = ["Shot %d 接线：" % shot_index]
     for i, (global_num, role) in enumerate(data["refs"], 1):
-        parts.append("<Picture %d>=%s（你的图%d）" % (i, role, global_num))
+        parts.append("<Picture %d>=%s（图库第 %d 张）" % (i, role, global_num))
     if data["missing"]:
         parts.append("缺映射：" + "、".join(data["missing"]))
     for role, number, first_role in data["merged"]:
@@ -161,6 +161,31 @@ def build_wiring_note(storyboard_json, mapping_json, shot_index):
     if len(data["refs"]) > 9:
         parts.append("警告：本镜引用 %d 张图，超过 H3 上限 9 张，请拆分镜头" % len(data["refs"]))
     return "；".join(parts)
+
+
+def build_per_shot_wiring(storyboard_json, mapping_json):
+    """逐镜接线汇总（离线）：每镜一行，列出该镜需要连接的参考图。"""
+    try:
+        storyboard = _load_json(storyboard_json, "storyboard_json")
+        _load_json(mapping_json, "mapping_json")
+    except ValueError:
+        return ""
+    shots = storyboard.get("shots", [])
+    if not shots:
+        return ""
+    lines = []
+    for idx in range(1, len(shots) + 1):
+        try:
+            data = compute_shot_refs(storyboard_json, mapping_json, idx)
+        except ValueError:
+            continue
+        parts = []
+        for i, (global_num, role) in enumerate(data["refs"], 1):
+            parts.append("<Picture %d>=%s（图库第 %d 张）" % (i, role, global_num))
+        if data["missing"]:
+            parts.append("缺映射：" + "、".join(data["missing"]))
+        lines.append("Shot %d: %s" % (idx, "、".join(parts)))
+    return "\n".join(lines)
 
 
 def build_manju_system_prompt(rule_file, extra):

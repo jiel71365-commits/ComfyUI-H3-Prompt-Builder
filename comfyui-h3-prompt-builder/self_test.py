@@ -231,7 +231,19 @@ class TestManjuRefs(unittest.TestCase):
     def test_wiring_note(self):
         note = manju_nodes.build_wiring_note(self.STORYBOARD, self.MAPPING, 2)
         self.assertIn("<Picture 1>=角色A", note)
-        self.assertIn("你的图1", note)
+        self.assertIn("图库第 1 张", note)
+        self.assertNotIn("你的图", note)
+
+    def test_per_shot_wiring(self):
+        out = manju_nodes.build_per_shot_wiring(self.STORYBOARD, self.MAPPING)
+        self.assertIn("Shot 1:", out)
+        self.assertIn("Shot 2:", out)
+        self.assertIn("角色A", out)
+        self.assertIn("图库第 1 张", out)
+        self.assertNotIn("你的图", out)
+
+    def test_per_shot_wiring_invalid(self):
+        self.assertEqual(manju_nodes.build_per_shot_wiring("bad", "{}"), "")
 
 
 class TestManjuSystemPrompt(unittest.TestCase):
