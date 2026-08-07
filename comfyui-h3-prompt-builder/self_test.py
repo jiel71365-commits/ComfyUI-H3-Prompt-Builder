@@ -619,5 +619,17 @@ class TestManjuImagePromptNode(unittest.TestCase):
         self.assertIn("古风", user)
 
 
+class TestManjuV24Rules(unittest.TestCase):
+    def test_storyboard_rules_upgraded(self):
+        content = manju_nodes.read_text_file(os.path.join(manju_nodes.RULES_DIR, "manju_storyboard.txt"))
+        for keyword in ("purpose", "coverage", "情绪外化表", "边界锁", "镜头设计样例"):
+            self.assertIn(keyword, content)
+
+    def test_review_rules_exist(self):
+        content = manju_nodes.read_text_file(os.path.join(manju_nodes.RULES_DIR, "manju_review.txt"))
+        for keyword in ("覆盖率", "轴线", "连续性", "时长对账", "动作具体性", "情绪外化", "资产完整性", "台词"):
+            self.assertIn(keyword, content)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
