@@ -672,7 +672,7 @@ class TestManjuDirectorReview(unittest.TestCase):
             "assets": {"characters": [{"id": "角色A", "description": "", "shots": [1, 2]}], "scenes": [{"id": "场景A", "description": "", "shots": [1, 2]}], "props": []},
         }, ensure_ascii=False)
         seq = [
-            json.dumps({"verdict": "FAIL", "issues": [{"severity": "high", "shot_id": "1", "field": "action", "problem": "抽象动词", "suggestion": "改肢体动作"}], "summary": "fix"}, ensure_ascii=False),
+            json.dumps({"verdict": "FAIL", "issues": [{"severity": "high", "shot_id": "-1", "field": "coverage", "problem": "关键节拍丢戏", "suggestion": "增加镜头"}], "summary": "fix"}, ensure_ascii=False),
             fixed,
             json.dumps({"verdict": "PASS", "issues": [], "summary": "ok"}, ensure_ascii=False),
         ]
@@ -689,6 +689,7 @@ class TestManjuDirectorReview(unittest.TestCase):
         self.assertEqual(json.loads(out[0])["storyboard"]["shots"][0]["action"], "角色A慢慢抬起右手")
         self.assertIn("问题清单", calls[1])
         self.assertIn("仅修复", calls[1])
+        self.assertIn("禁止新增", calls[1])
         self.assertIn("PASS", out[2])
 
     def test_max_rounds_warning(self):
@@ -712,6 +713,87 @@ class TestManjuDirectorReview(unittest.TestCase):
         node = manju_nodes.ManjuDirectorReview()
         out = node.build("not json", "第一集剧本", "{}")
         self.assertIn("错误", out[0])
+
+
+class TestDurationNormalize(unittest.TestCase):
+    def test_fills_gap(self):
+        sb = {
+            "storyboard": {
+                "duration_seconds": 6,
+                "shots": [
+                    {"shot_id": 1, "duration": 2, "time_range": "0:00-0:02"},
+                    {"shot_id": 2, "duration": 2, "time_range": "0:02-0:04"},
+                ],
+            },
+            "assets": {},
+        }
+        out = json.loads(manju_nodes._normalize_durations(json.dumps(sb, ensure_ascii=False)))
+        shots = out["storyboard"]["shots"]
+        self.assertEqual(sum(s["duration"] for s in shots), 6)
+        self.assertEqual(shots[-1]["time_range"], "0:03-0:06")
+
+    def test_no_change_when_correct(self):
+        sb = {
+            "storyboard": {
+                "duration_seconds": 6,
+                "shots": [
+                    {"shot_id": 1, "duration": 3, "time_range": "0:00-0:03"},
+                    {"shot_id": 2, "duration": 3, "time_range": "0:03-0:06"},
+                ],
+            },
+            "assets": {},
+        }
+        text = json.dumps(sb, ensure_ascii=False)
+        self.assertEqual(json.loads(manju_nodes._normalize_durations(text)), json.loads(text))
+
+    def test_plain_storyboard_root(self):
+        sb = {"duration_seconds": 4, "shots": [{"shot_id": 1, "duration": 3, "time_range": "0:00-0:03"}]}
+        out = json.loads(manju_nodes._normalize_durations(json.dumps(sb, ensure_ascii=False)))
+        self.assertEqual(sum(s["duration"] for s in out["shots"]), 4)
+
+    def test_target_restored_when_changed(self):
+        sb = {
+            "storyboard": {
+                "duration_seconds": 6,
+                "shots": [
+                    {"shot_id": 1, "duration": 3, "time_range": "0:00-0:03"},
+                    {"shot_id": 2, "duration": 3, "time_range": "0:03-0:06"},
+                ],
+            },
+            "assets": {},
+        }
+        out = json.loads(manju_nodes._normalize_durations(json.dumps(sb, ensure_ascii=False), target=8))
+        self.assertEqual(out["storyboard"]["duration_seconds"], 8)
+        self.assertEqual(sum(s["duration"] for s in out["storyboard"]["shots"]), 8)
+
+
+class TestIssueNormalize(unittest.TestCase):
+    def test_high_continuity_downgraded(self):
+        issues = [
+            {"severity": "high", "field": "continuity", "problem": "x", "suggestion": "y"},
+            {"severity": "high", "field": "coverage", "problem": "丢戏", "suggestion": "加镜头"},
+        ]
+        out = manju_nodes._normalize_issues(issues)
+        self.assertEqual([i["severity"] for i in out], ["medium", "high"])
+
+    def test_duration_high_downgraded(self):
+        issues = [{"severity": "high", "field": "duration", "problem": "x", "suggestion": "y"}]
+        out = manju_nodes._normalize_issues(issues)
+        self.assertEqual(out[0]["severity"], "medium")
+
+    def test_noop_issue_removed(self):
+        issues = [
+            {"severity": "high", "field": "duration", "problem": "无需修改", "suggestion": "无"},
+            {"severity": "medium", "field": "action", "problem": "z", "suggestion": "具体化"},
+        ]
+        out = manju_nodes._normalize_issues(issues)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["field"], "action")
+
+    def test_bad_issue_entries_removed(self):
+        issues = ["not-a-dict", None, {"severity": "high", "field": "coverage", "problem": "丢戏", "suggestion": "加镜头"}]
+        out = manju_nodes._normalize_issues(issues)
+        self.assertEqual(len(out), 1)
 
 
 if __name__ == "__main__":
