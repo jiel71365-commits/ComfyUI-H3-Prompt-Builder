@@ -363,7 +363,7 @@ class TestAutoSuggest(unittest.TestCase):
 
     def test_auto_suggest_mapping(self):
         node = manju_nodes.ManjuResourceMapping()
-        out = node.build("", self.ASSETS, False)
+        out = node.build("", self.ASSETS, "关闭")
         mapping = json.loads(out[0])
         self.assertEqual(mapping["角色A"], 1)
         self.assertEqual(mapping["场景A"], 2)
@@ -372,10 +372,11 @@ class TestAutoSuggest(unittest.TestCase):
 
     def test_image_prompts(self):
         node = manju_nodes.ManjuResourceMapping()
-        out = node.build("", self.ASSETS, True)
+        out = node.build("", self.ASSETS, "离线模板")
         self.assertIn("角色A", out[2])
         self.assertIn("黑发少年", out[2])
         self.assertIn("设定图", out[2])
+        self.assertIn("三视图", out[2])
 
 
 class TestManjuV2Nodes(unittest.TestCase):
@@ -445,19 +446,19 @@ class TestManjuV2Nodes(unittest.TestCase):
 
     def test_per_shot_wiring_output(self):
         node = manju_nodes.ManjuResourceMapping()
-        out = node.build("", TestAutoSuggest.ASSETS, False, TestManjuRefs.STORYBOARD)
+        out = node.build("", TestAutoSuggest.ASSETS, "关闭", TestManjuRefs.STORYBOARD)
         self.assertIn("Shot 1:", out[3])
 
     def test_per_shot_wiring_empty_without_storyboard(self):
         node = manju_nodes.ManjuResourceMapping()
-        out = node.build("", TestAutoSuggest.ASSETS, False)
+        out = node.build("", TestAutoSuggest.ASSETS, "关闭")
         self.assertEqual(out[3], "")
 
 
 class TestShotSelect(unittest.TestCase):
     def test_filtered_mapping_shot1(self):
         node = manju_nodes.ManjuResourceMapping()
-        out = node.build("", TestAutoSuggest.ASSETS, False, TestManjuRefs.STORYBOARD, 1)
+        out = node.build("", TestAutoSuggest.ASSETS, "关闭", TestManjuRefs.STORYBOARD, 1)
         mapping = json.loads(out[0])
         self.assertEqual(mapping, {"角色A": 1, "场景A": 2})
         self.assertIn("角色A=图1", out[1])
@@ -467,19 +468,19 @@ class TestShotSelect(unittest.TestCase):
 
     def test_default_zero_full(self):
         node = manju_nodes.ManjuResourceMapping()
-        out = node.build("", TestAutoSuggest.ASSETS, False, TestManjuRefs.STORYBOARD, 0)
+        out = node.build("", TestAutoSuggest.ASSETS, "关闭", TestManjuRefs.STORYBOARD, 0)
         self.assertIn("Shot 1:", out[3])
         self.assertIn("Shot 2:", out[3])
 
     def test_out_of_range(self):
         node = manju_nodes.ManjuResourceMapping()
-        out = node.build("", TestAutoSuggest.ASSETS, False, TestManjuRefs.STORYBOARD, 99)
+        out = node.build("", TestAutoSuggest.ASSETS, "关闭", TestManjuRefs.STORYBOARD, 99)
         self.assertIn("错误：镜头序号超出范围", out[3])
         self.assertIn("道具A", out[0])
 
     def test_image_prompts_unchanged(self):
         node = manju_nodes.ManjuResourceMapping()
-        out = node.build("", TestAutoSuggest.ASSETS, True, TestManjuRefs.STORYBOARD, 1)
+        out = node.build("", TestAutoSuggest.ASSETS, "离线模板", TestManjuRefs.STORYBOARD, 1)
         self.assertIn("道具A", out[2])
 
     def test_input_types_has_shot_index(self):
@@ -488,11 +489,27 @@ class TestShotSelect(unittest.TestCase):
 
     def test_derive_assets_when_missing(self):
         node = manju_nodes.ManjuResourceMapping()
-        out = node.build("", "", False, TestManjuRefs.STORYBOARD, 1)
+        out = node.build("", "", "关闭", TestManjuRefs.STORYBOARD, 1)
         mapping = json.loads(out[0])
         self.assertIn("角色A", mapping)
         self.assertIn("场景A", mapping)
         self.assertIn("Shot 1:", out[3])
+
+
+class TestImagePromptMode(unittest.TestCase):
+    def test_default_mode(self):
+        it = manju_nodes.ManjuResourceMapping.INPUT_TYPES()
+        self.assertEqual(it["optional"]["image_prompt_mode"][1].get("default"), "LLM 生成")
+
+    def test_off_mode_empty(self):
+        node = manju_nodes.ManjuResourceMapping()
+        out = node.build("", TestAutoSuggest.ASSETS, "关闭")
+        self.assertEqual(out[2], "")
+
+    def test_rules_file_content(self):
+        content = manju_nodes.read_text_file(os.path.join(manju_nodes.RULES_DIR, "manju_image_prompt.txt"))
+        for keyword in ("三视图", "面部特写", "双手自然垂下"):
+            self.assertIn(keyword, content)
 
 
 if __name__ == "__main__":

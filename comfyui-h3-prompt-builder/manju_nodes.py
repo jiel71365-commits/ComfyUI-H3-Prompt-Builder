@@ -17,6 +17,7 @@ DURATIONS = ["自动", "60", "90", "120", "180", "300"]
 OUTPUT_LANGUAGES = ["自动（英文结构+保留原文）", "中文提示词", "全英文"]
 AUDIO_TEXT_POLICIES = ["禁字幕+无BGM", "仅禁BGM", "仅禁字幕", "保留默认"]
 DEFAULT_MANJU_POLICY = "禁字幕+无BGM"
+IMAGE_PROMPT_MODES = ["LLM 生成", "离线模板", "关闭"]
 
 
 def build_preset_json(style, aspect_ratio, duration, output_language, audio_text_policy=DEFAULT_MANJU_POLICY):
@@ -294,20 +295,30 @@ def derive_assets_from_storyboard(storyboard_json):
             add("props", pid, shot_id)
     return json.dumps(assets, ensure_ascii=False, indent=2)
 
-
-def _build_image_prompts(assets):
-    """根据资源清单生成设定图提示词（本地模板）。"""
+def _build_image_prompts(assets, style=""):
+    """根据资源清单生成设定图提示词（本地模板，离线）。"""
+    style_suffix = "，%s风格" % style if style else ""
     lines = []
     for item in assets.get("characters", []):
         desc = item.get("description", "") or ""
-        lines.append("%s：%s，漫剧角色设定图，竖屏9:16，半身立绘，简洁背景，高清" % (item.get("id", "角色"), desc))
+        lines.append("%s：%s，漫剧角色设定图（全身三视图正面/侧面/背面并排+面部特写，双手自然垂下），竖屏9:16，简洁纯色背景，柔和均匀光，高清%s" % (item.get("id", "角色"), desc, style_suffix))
     for item in assets.get("scenes", []):
         desc = item.get("description", "") or ""
-        lines.append("%s：%s，漫剧场景空镜图，竖屏9:16，无人物，干净构图" % (item.get("id", "场景"), desc))
+        lines.append("%s：%s，漫剧场景空镜图，竖屏9:16，无人物，干净构图%s" % (item.get("id", "场景"), desc, style_suffix))
     for item in assets.get("props", []):
         desc = item.get("description", "") or ""
-        lines.append("%s：%s，漫剧道具特写图，竖屏9:16，简洁背景" % (item.get("id", "道具"), desc))
+        lines.append("%s：%s，漫剧道具特写图，竖屏9:16，简洁背景%s" % (item.get("id", "道具"), desc, style_suffix))
     return "\n".join(lines)
+
+
+def _style_from_preset(preset_json):
+    if preset_json and preset_json.strip():
+        try:
+            preset = json.loads(preset_json)
+            return preset.get("style") or ""
+        except Exception:
+            pass
+    return ""
 
 
 def _policy_from_preset(preset_json, default=DEFAULT_MANJU_POLICY):
@@ -355,9 +366,14 @@ class ManjuResourceMapping:
             },
             "optional": {
                 "assets_json": ("STRING", {"multiline": True, "default": ""}),
-                "generate_image_prompts": ("BOOLEAN", {"default": False}),
+                "image_prompt_mode": (IMAGE_PROMPT_MODES, {"default": "LLM 生成"}),
                 "storyboard_json": ("STRING", {"multiline": True, "default": ""}),
                 "shot_index": ("INT", {"default": 0, "min": 0, "max": 999}),
+                "preset_json": ("STRING", {"multiline": True, "default": "{}"}),
+                "api_key": ("STRING", {"default": ""}),
+                "model": ("STRING", {"default": ""}),
+                "base_url": ("STRING", {"default": ""}),
+                "llm_config": ("STRING", {"multiline": True, "default": ""}),
             },
         }
 
@@ -366,22 +382,26 @@ class ManjuResourceMapping:
     FUNCTION = "build"
     CATEGORY = "MiniMax H3 / 漫剧"
 
-    def build(self, mapping_text, assets_json="", generate_image_prompts=False, storyboard_json="", shot_index=0):
+    def build(self, mapping_text, assets_json="", image_prompt_mode="LLM 生成", storyboard_json="", shot_index=0,
+              preset_json="{}", api_key="", model="", base_url="", llm_config=""):
         suggested = ""
         image_prompts = ""
         text = (mapping_text or "").strip()
         assets = {}
         assets_valid = False
+        assets_str = ""
         if assets_json and assets_json.strip():
             try:
                 assets = json.loads(assets_json)
                 assets_valid = True
+                assets_str = assets_json.strip()
             except Exception:
                 assets_valid = False
         if not text and not assets_valid and storyboard_json and storyboard_json.strip():
             try:
                 assets = json.loads(derive_assets_from_storyboard(storyboard_json))
                 assets_valid = True
+                assets_str = json.dumps(assets, ensure_ascii=False)
             except Exception:
                 pass
         if not text and assets_valid:
@@ -403,8 +423,12 @@ class ManjuResourceMapping:
                 mapping_json = parse_mapping_text("", assets_json)
         else:
             mapping_json = parse_mapping_text(text, assets_json)
-        if generate_image_prompts and assets_valid:
-            image_prompts = _build_image_prompts(assets)
+        style = _style_from_preset(preset_json)
+        if image_prompt_mode == "LLM 生成":
+            if assets_valid:
+                image_prompts = _build_image_prompts_llm(assets_str, preset_json, api_key, model, base_url, llm_config)
+        elif image_prompt_mode == "离线模板" and assets_valid:
+            image_prompts = _build_image_prompts(assets, style)
         per_shot_wiring = ""
         if storyboard_json and storyboard_json.strip():
             per_shot_wiring = build_per_shot_wiring(storyboard_json, mapping_json)
