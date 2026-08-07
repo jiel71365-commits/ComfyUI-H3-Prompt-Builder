@@ -419,7 +419,7 @@ class ManjuResourceMapping:
             },
             "optional": {
                 "assets_json": ("STRING", {"multiline": True, "default": ""}),
-                "image_prompt_mode": (IMAGE_PROMPT_MODES, {"default": "LLM 生成"}),
+                "image_prompt_mode": (IMAGE_PROMPT_MODES, {"default": "关闭"}),
                 "storyboard_json": ("STRING", {"multiline": True, "default": ""}),
                 "shot_index": ("INT", {"default": 0, "min": 0, "max": 999}),
                 "preset_json": ("STRING", {"multiline": True, "default": "{}"}),
@@ -435,7 +435,7 @@ class ManjuResourceMapping:
     FUNCTION = "build"
     CATEGORY = "MiniMax H3 / 漫剧"
 
-    def build(self, mapping_text, assets_json="", image_prompt_mode="LLM 生成", storyboard_json="", shot_index=0,
+    def build(self, mapping_text, assets_json="", image_prompt_mode="关闭", storyboard_json="", shot_index=0,
               preset_json="{}", api_key="", model="", base_url="", llm_config=""):
         suggested = ""
         image_prompts = ""

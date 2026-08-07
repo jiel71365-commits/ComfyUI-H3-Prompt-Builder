@@ -499,7 +499,7 @@ class TestShotSelect(unittest.TestCase):
 class TestImagePromptMode(unittest.TestCase):
     def test_default_mode(self):
         it = manju_nodes.ManjuResourceMapping.INPUT_TYPES()
-        self.assertEqual(it["optional"]["image_prompt_mode"][1].get("default"), "LLM 生成")
+        self.assertEqual(it["optional"]["image_prompt_mode"][1].get("default"), "关闭")
 
     def test_off_mode_empty(self):
         node = manju_nodes.ManjuResourceMapping()
