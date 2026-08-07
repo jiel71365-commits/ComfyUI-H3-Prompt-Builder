@@ -591,5 +591,33 @@ class TestRequestTimeout(unittest.TestCase):
         return fake_urlopen
 
 
+class TestManjuImagePromptNode(unittest.TestCase):
+    def test_input_types(self):
+        it = manju_nodes.ManjuImagePrompt.INPUT_TYPES()
+        self.assertIn("assets_json", it["required"])
+        self.assertIn("preset_json", it["required"])
+
+    def test_empty_assets(self):
+        node = manju_nodes.ManjuImagePrompt()
+        out = node.build("", "{}")
+        self.assertIn("请先输入资产清单", out[0])
+
+    def test_llm_called(self):
+        captured = []
+
+        def fake_llm(*args, **kwargs):
+            captured.append((args[3], args[4]))
+            return "MOCK_IMG"
+
+        node = manju_nodes.ManjuImagePrompt()
+        with unittest.mock.patch.object(manju_nodes, "call_llm", side_effect=fake_llm):
+            out = node.build(TestAutoSuggest.ASSETS, '{"style":"古风"}', api_key="k")
+        self.assertEqual(out[0], "MOCK_IMG")
+        system, user = captured[0]
+        self.assertIn("美术设定师", system)
+        self.assertIn("资源清单", user)
+        self.assertIn("古风", user)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

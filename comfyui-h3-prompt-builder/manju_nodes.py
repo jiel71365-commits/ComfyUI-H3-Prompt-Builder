@@ -379,6 +379,35 @@ class ManjuPreset:
         return (build_preset_json(style, aspect_ratio, duration, output_language, audio_text_policy),)
 
 
+class ManjuImagePrompt:
+    """漫剧：设定图提示词——独立生成角色/场景/道具设定图提示词（供外部生图模型使用）。"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "assets_json": ("STRING", {"multiline": True, "default": ""}),
+                "preset_json": ("STRING", {"multiline": True, "default": "{}"}),
+            },
+            "optional": {
+                "api_key": ("STRING", {"default": ""}),
+                "model": ("STRING", {"default": ""}),
+                "base_url": ("STRING", {"default": ""}),
+                "llm_config": ("STRING", {"multiline": True, "default": ""}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("image_prompts",)
+    FUNCTION = "build"
+    CATEGORY = "MiniMax H3 / 漫剧"
+
+    def build(self, assets_json, preset_json="{}", api_key="", model="", base_url="", llm_config=""):
+        if not (assets_json or "").strip():
+            return ("请先输入资产清单（分镜节点输出的 assets_json）。",)
+        return (_build_image_prompts_llm(assets_json, preset_json, api_key, model, base_url, llm_config),)
+
+
 class ManjuResourceMapping:
     """漫剧资源映射：解析映射文本；留空时按资源清单自动建议。"""
 
