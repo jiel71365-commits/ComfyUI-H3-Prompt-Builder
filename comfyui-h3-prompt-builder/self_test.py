@@ -796,5 +796,57 @@ class TestIssueNormalize(unittest.TestCase):
         self.assertEqual(len(out), 1)
 
 
+class TestDirectorReviewAssets(unittest.TestCase):
+    SB_PLAIN = json.dumps({
+        "duration_seconds": 6,
+        "shots": [
+            {"shot_id": 1, "duration": 3, "time_range": "0:00-0:03", "scene": "场景A", "characters": ["角色A"], "props": ["道具A"], "action": "x", "camera": "固定", "continuity": {"start": "s", "end": "e"}, "purpose": "p"},
+            {"shot_id": 2, "duration": 3, "time_range": "0:03-0:06", "scene": "场景A", "characters": ["角色A"], "props": [], "action": "y", "camera": "固定", "continuity": {"start": "e", "end": "e2"}, "purpose": "p"},
+        ],
+    }, ensure_ascii=False)
+
+    def _pass_llm(self):
+        def fake_llm(*a, **k):
+            return json.dumps({"verdict": "PASS", "issues": [], "summary": "ok"}, ensure_ascii=False)
+        return fake_llm
+
+    def test_plain_input_assets_derived(self):
+        node = manju_nodes.ManjuDirectorReview()
+        with unittest.mock.patch.object(manju_nodes, "call_llm", side_effect=self._pass_llm()):
+            out = node.build(self.SB_PLAIN, "剧本", "{}", api_key="k")
+        assets = json.loads(out[1])
+        self.assertEqual([c["id"] for c in assets["characters"]], ["角色A"])
+        self.assertEqual(assets["scenes"][0]["id"], "场景A")
+        self.assertEqual(assets["props"][0]["id"], "道具A")
+        top = json.loads(out[0])
+        self.assertIn("shots", top)
+        self.assertNotIn("storyboard", top)
+
+    def test_assets_json_parameter_used(self):
+        assets_in = json.dumps({
+            "characters": [{"id": "角色A", "description": "详细描述", "shots": [1]}],
+            "scenes": [], "props": [],
+        }, ensure_ascii=False)
+        node = manju_nodes.ManjuDirectorReview()
+        with unittest.mock.patch.object(manju_nodes, "call_llm", side_effect=self._pass_llm()):
+            out = node.build(self.SB_PLAIN, "剧本", "{}", api_key="k", assets_json=assets_in)
+        assets = json.loads(out[1])
+        self.assertEqual(assets["characters"][0]["description"], "详细描述")
+
+    def test_wrapper_input_stays_wrapper(self):
+        node = manju_nodes.ManjuDirectorReview()
+        with unittest.mock.patch.object(manju_nodes, "call_llm", side_effect=self._pass_llm()):
+            out = node.build(TestManjuDirectorReview.SB, "剧本", "{}", api_key="k")
+        top = json.loads(out[0])
+        self.assertIn("storyboard", top)
+        self.assertIn("assets", top)
+
+    def test_derive_assets_wrapper_supported(self):
+        wrapper = json.dumps({"storyboard": json.loads(self.SB_PLAIN), "assets": {}}, ensure_ascii=False)
+        assets = json.loads(manju_nodes.derive_assets_from_storyboard(wrapper))
+        self.assertEqual([c["id"] for c in assets["characters"]], ["角色A"])
+        self.assertEqual(assets["props"][0]["id"], "道具A")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

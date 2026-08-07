@@ -272,6 +272,7 @@ def resolve_llm_config(api_key, model, base_url, llm_config_json=""):
 def derive_assets_from_storyboard(storyboard_json):
     """从分镜 JSON 反推资源清单（离线，description 为空）。"""
     storyboard = _load_json(storyboard_json, "storyboard_json")
+    root = storyboard.get("storyboard") if isinstance(storyboard.get("storyboard"), dict) else storyboard
     assets = {"characters": [], "scenes": [], "props": []}
     seen = {"characters": set(), "scenes": set(), "props": set()}
 
@@ -286,7 +287,7 @@ def derive_assets_from_storyboard(storyboard_json):
         seen[category].add(item_id)
         assets[category].append({"id": item_id, "description": "", "shots": [shot_id]})
 
-    for shot in storyboard.get("shots", []):
+    for shot in root.get("shots", []):
         shot_id = shot.get("shot_id")
         for cid in shot.get("characters", []):
             add("characters", cid, shot_id)
@@ -696,6 +697,7 @@ class ManjuDirectorReview:
                 "preset_json": ("STRING", {"multiline": True, "default": "{}"}),
             },
             "optional": {
+                "assets_json": ("STRING", {"multiline": True, "default": ""}),
                 "api_key": ("STRING", {"default": ""}),
                 "model": ("STRING", {"default": ""}),
                 "base_url": ("STRING", {"default": ""}),
@@ -708,12 +710,26 @@ class ManjuDirectorReview:
     FUNCTION = "build"
     CATEGORY = "MiniMax H3 / 漫剧"
 
-    def build(self, storyboard_json, script, preset_json="{}", api_key="", model="", base_url="", llm_config=""):
+    def build(self, storyboard_json, script, preset_json="{}", assets_json="", api_key="", model="", base_url="", llm_config=""):
         try:
             data = _load_json(storyboard_json, "storyboard_json")
         except ValueError as exc:
             return ("错误：" + str(exc), "{}", "")
-        fixed_target = _storyboard_root(data).get("duration_seconds")
+        has_wrapper = isinstance(data.get("storyboard"), dict)
+        root = _storyboard_root(data)
+        fixed_target = root.get("duration_seconds")
+        assets = data.get("assets") if has_wrapper else {}
+        if not assets and (assets_json or "").strip():
+            try:
+                assets = json.loads(assets_json)
+            except Exception:
+                assets = {}
+        if not assets:
+            try:
+                assets = json.loads(derive_assets_from_storyboard(storyboard_json))
+            except Exception:
+                assets = {}
+        current = json.dumps({"storyboard": root, "assets": assets}, ensure_ascii=False, indent=2)
         key, model_name, endpoint, temperature, config, warning = resolve_llm_config(api_key, model, base_url, llm_config)
         if not key:
             return ("未配置 API Key：请在 LLM 配置节点、节点 api_key 输入框或 config.json 中填写。", "{}", "")
@@ -725,7 +741,7 @@ class ManjuDirectorReview:
             review_temp = 0.1
         fix_temp = temperature if temperature is not None else config.get("manju_temperature", 0.2)
 
-        current = _normalize_durations(storyboard_json, target=fixed_target)
+        current = _normalize_durations(current, target=fixed_target)
         report_parts = []
         reached_limit = False
         try:
@@ -746,20 +762,30 @@ class ManjuDirectorReview:
                 if round_no == max_rounds:
                     reached_limit = True
                     break
-                current = _fix_storyboard(
+                fixed = _fix_storyboard(
                     current, script, issues, endpoint, key, model_name, fix_temp, config
                 )
+                fixed_data = _load_json(fixed, "storyboard_json")
+                fixed_root = _storyboard_root(fixed_data)
+                fixed_assets = fixed_data.get("assets") if isinstance(fixed_data.get("storyboard"), dict) else None
+                if not fixed_assets:
+                    fixed_assets = assets
+                current = json.dumps({"storyboard": fixed_root, "assets": fixed_assets}, ensure_ascii=False, indent=2)
                 current = _normalize_durations(current, target=fixed_target)
         except Exception as exc:
             return ("LLM 调用失败：" + str(exc), "{}", "")
 
         final = _load_json(current, "storyboard_json")
-        assets_json = json.dumps(final.get("assets", {}), ensure_ascii=False, indent=2)
+        assets_out = json.dumps(final.get("assets", {}), ensure_ascii=False, indent=2)
+        if has_wrapper:
+            out_json = current
+        else:
+            out_json = json.dumps(_storyboard_root(final), ensure_ascii=False, indent=2)
         if reached_limit:
             report_parts.append("警告：已达最大审阅轮数（%d），分镜仍有未通过项，请人工检查。" % max_rounds)
         if warning:
             report_parts.insert(0, warning)
-        return (current, assets_json, "\n".join(report_parts))
+        return (out_json, assets_out, "\n".join(report_parts))
 
 
 class ManjuShotPrompt:
