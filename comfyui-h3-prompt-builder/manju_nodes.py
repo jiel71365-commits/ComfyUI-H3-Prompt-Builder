@@ -574,6 +574,71 @@ class ManjuScriptToStoryboard:
         return (storyboard_json, assets_json, summary)
 
 
+def _fmt_time(seconds):
+    return "%d:%02d" % (int(seconds) // 60, int(seconds) % 60)
+
+
+def _storyboard_root(data):
+    if isinstance(data, dict) and isinstance(data.get("storyboard"), dict):
+        return data["storyboard"]
+    return data
+
+
+def _normalize_durations(storyboard_json, target=None):
+    """机械修正时长：镜头 duration 之和必须等于目标时长，并重算连续 time_range。"""
+    try:
+        data = _load_json(storyboard_json, "storyboard_json")
+    except ValueError:
+        return storyboard_json
+    root = _storyboard_root(data)
+    shots = root.get("shots") or []
+    if target is None:
+        target = root.get("duration_seconds")
+    if not shots or not target:
+        return storyboard_json
+    try:
+        target_int = int(target)
+    except (TypeError, ValueError):
+        return storyboard_json
+    durations = []
+    for shot in shots:
+        try:
+            durations.append(max(1, int(shot.get("duration") or 0)))
+        except (TypeError, ValueError):
+            durations.append(2)
+    diff = target_int - sum(durations)
+    idx = 0
+    while diff != 0:
+        step = 1 if diff > 0 else -1
+        durations[idx % len(durations)] = max(1, durations[idx % len(durations)] + step)
+        diff -= step
+        idx += 1
+    cursor = 0
+    for shot, dur in zip(shots, durations):
+        shot["duration"] = dur
+        shot["time_range"] = "%s-%s" % (_fmt_time(cursor), _fmt_time(cursor + dur))
+        cursor += dur
+    root["duration_seconds"] = target_int
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def _normalize_issues(issues):
+    """规范化审阅问题：过滤无效项；axis/continuity/action/duration 的 high 降级为 medium。"""
+    out = []
+    downgrade_fields = ("axis", "continuity", "action", "duration")
+    for issue in issues or []:
+        if not isinstance(issue, dict):
+            continue
+        problem = str(issue.get("problem") or "")
+        suggestion = str(issue.get("suggestion") or "")
+        if "无需修改" in problem or suggestion.strip() in ("", "无"):
+            continue
+        if issue.get("severity") == "high" and str(issue.get("field") or "") in downgrade_fields:
+            issue["severity"] = "medium"
+        out.append(issue)
+    return out
+
+
 def _review_storyboard(storyboard_json, script, preset_json, endpoint, key, model_name, review_temp, config):
     """调用审阅 LLM，返回 (verdict, report_text)。"""
     system = build_manju_system_prompt("manju_review.txt", "")
@@ -603,6 +668,10 @@ def _fix_storyboard(storyboard_json, script, issues, endpoint, key, model_name, 
         + "\n\n【当前分镜 JSON】\n" + storyboard_json
         + "\n\n【审阅问题清单】\n" + issues_text
         + "\n\n请仅修复上述列出的问题，保持其余内容不变；输出完整的分镜 JSON（storyboard + assets）。"
+        + "\n\n【硬性约束】"
+        + "\n- 禁止新增、删除或改写任何台词（dialogue 必须与剧本原文逐字一致）。"
+        + "\n- 只修改问题清单中列出的字段，其余内容一律保持不变。"
+        + "\n- 禁止改变镜头数量、duration_seconds 与各镜头时长总额；如问题涉及资产，只补充缺失项，不删除已有项。"
     )
     raw = call_llm(
         endpoint, key, model_name, system, user_msg,
@@ -641,13 +710,14 @@ class ManjuDirectorReview:
 
     def build(self, storyboard_json, script, preset_json="{}", api_key="", model="", base_url="", llm_config=""):
         try:
-            _load_json(storyboard_json, "storyboard_json")
+            data = _load_json(storyboard_json, "storyboard_json")
         except ValueError as exc:
             return ("错误：" + str(exc), "{}", "")
+        fixed_target = _storyboard_root(data).get("duration_seconds")
         key, model_name, endpoint, temperature, config, warning = resolve_llm_config(api_key, model, base_url, llm_config)
         if not key:
             return ("未配置 API Key：请在 LLM 配置节点、节点 api_key 输入框或 config.json 中填写。", "{}", "")
-        max_rounds = int(config.get("max_review_rounds") or 5)
+        max_rounds = int(config.get("max_review_rounds") or 8)
         review_temp = config.get("reviewer_temperature")
         try:
             review_temp = float(review_temp) if review_temp is not None else 0.1
@@ -655,7 +725,7 @@ class ManjuDirectorReview:
             review_temp = 0.1
         fix_temp = temperature if temperature is not None else config.get("manju_temperature", 0.2)
 
-        current = storyboard_json
+        current = _normalize_durations(storyboard_json, target=fixed_target)
         report_parts = []
         reached_limit = False
         try:
@@ -665,8 +735,13 @@ class ManjuDirectorReview:
                 )
                 report_parts.append("=== 审阅第 %d 轮 ===\n%s" % (round_no, report))
                 parsed = _extract_json(report)
-                issues = parsed.get("issues", []) if parsed else []
-                if verdict == "PASS":
+                if parsed is None:
+                    issues = []
+                    has_high = True
+                else:
+                    issues = _normalize_issues(parsed.get("issues", []))
+                    has_high = any(issue.get("severity") == "high" for issue in issues)
+                if not has_high:
                     break
                 if round_no == max_rounds:
                     reached_limit = True
@@ -674,6 +749,7 @@ class ManjuDirectorReview:
                 current = _fix_storyboard(
                     current, script, issues, endpoint, key, model_name, fix_temp, config
                 )
+                current = _normalize_durations(current, target=fixed_target)
         except Exception as exc:
             return ("LLM 调用失败：" + str(exc), "{}", "")
 

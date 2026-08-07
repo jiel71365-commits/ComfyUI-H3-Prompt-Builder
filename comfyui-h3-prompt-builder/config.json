@@ -5,5 +5,8 @@
   "temperature": 0.4,
   "max_tokens": 32768,
   "manju_temperature": 0.2,
-  "thinking_disabled": true
+  "thinking_disabled": true,
+  "request_timeout": 240,
+  "reviewer_temperature": 0.1,
+  "max_review_rounds": 8
 }
