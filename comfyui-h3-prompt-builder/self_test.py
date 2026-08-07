@@ -534,5 +534,62 @@ class TestImagePromptMode(unittest.TestCase):
         self.assertIn("图像提示词生成失败", out[2])
 
 
+class TestRequestTimeout(unittest.TestCase):
+    def _patch_llm(self, cfg, timeout_arg=None):
+        captured = {}
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b'{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}'
+
+        def fake_urlopen(request, timeout):
+            captured["timeout"] = timeout
+            return FakeResp()
+
+        def call():
+            if timeout_arg is None:
+                return nodes.call_llm("https://api.deepseek.com/chat/completions", "k", "m", "s", "u")
+            return nodes.call_llm("https://api.deepseek.com/chat/completions", "k", "m", "s", "u", timeout=timeout_arg)
+
+        return captured, call
+
+    def test_config_timeout_used(self):
+        captured, call = self._patch_llm({"thinking_disabled": True, "request_timeout": 240})
+        with unittest.mock.patch("urllib.request.urlopen", side_effect=self._fake_urlopen(captured)), \
+                unittest.mock.patch.object(nodes, "load_config", return_value={"thinking_disabled": True, "request_timeout": 240}):
+            call()
+        self.assertEqual(captured["timeout"], 240)
+
+    def test_explicit_timeout_wins(self):
+        captured, call = self._patch_llm({"thinking_disabled": True}, timeout_arg=77)
+        with unittest.mock.patch("urllib.request.urlopen", side_effect=self._fake_urlopen(captured)), \
+                unittest.mock.patch.object(nodes, "load_config", return_value={"thinking_disabled": True}):
+            call()
+        self.assertEqual(captured["timeout"], 77)
+
+    def _fake_urlopen(self, captured):
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b'{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}'
+
+        def fake_urlopen(request, timeout):
+            captured["timeout"] = timeout
+            return FakeResp()
+
+        return fake_urlopen
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
