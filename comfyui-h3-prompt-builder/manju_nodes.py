@@ -623,8 +623,20 @@ def _normalize_durations(storyboard_json, target=None):
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
+def _is_repetitive(text):
+    """检测文本内同一片段重复出现多次（防审阅模型复读输出爆炸）。"""
+    if len(text) < 100:
+        return False
+    step = 20
+    counts = {}
+    for i in range(0, len(text) - step + 1):
+        frag = text[i:i + step]
+        counts[frag] = counts.get(frag, 0) + 1
+    return any(count >= 6 for count in counts.values())
+
+
 def _normalize_issues(issues):
-    """规范化审阅问题：过滤无效项；axis/continuity/action/duration 的 high 降级为 medium。"""
+    """规范化审阅问题：过滤无效/超长/复读条目并限数；axis/continuity/action/duration 的 high 降级为 medium。"""
     out = []
     downgrade_fields = ("axis", "continuity", "action", "duration")
     for issue in issues or []:
@@ -634,9 +646,15 @@ def _normalize_issues(issues):
         suggestion = str(issue.get("suggestion") or "")
         if "无需修改" in problem or suggestion.strip() in ("", "无"):
             continue
+        if len(problem + suggestion) > 800:
+            continue
+        if _is_repetitive(problem) or _is_repetitive(suggestion):
+            continue
         if issue.get("severity") == "high" and str(issue.get("field") or "") in downgrade_fields:
             issue["severity"] = "medium"
         out.append(issue)
+        if len(out) >= 8:
+            break
     return out
 
 
@@ -652,7 +670,7 @@ def _review_storyboard(storyboard_json, script, preset_json, endpoint, key, mode
     raw = call_llm(
         endpoint, key, model_name, system, user_msg,
         temperature=review_temp,
-        max_tokens=config.get("max_tokens", 32768),
+        max_tokens=min(config.get("max_tokens", 32768), 8192),
     )
     parsed = _extract_json(raw)
     if parsed is None:

@@ -795,6 +795,34 @@ class TestIssueNormalize(unittest.TestCase):
         out = manju_nodes._normalize_issues(issues)
         self.assertEqual(len(out), 1)
 
+    def test_long_issue_removed(self):
+        issues = [{"severity": "high", "field": "dialogue", "problem": "重" * 900, "suggestion": "改"}]
+        out = manju_nodes._normalize_issues(issues)
+        self.assertEqual(len(out), 0)
+
+    def test_repetitive_issue_removed(self):
+        problem = "但分镜中台词与剧本一致，核对后无改写。" * 30
+        issues = [{"severity": "high", "field": "dialogue", "problem": problem, "suggestion": "y"}]
+        out = manju_nodes._normalize_issues(issues)
+        self.assertEqual(len(out), 0)
+
+    def test_issues_capped(self):
+        issues = [{"severity": "high", "field": "coverage", "problem": "丢戏%d" % i, "suggestion": "加"} for i in range(12)]
+        out = manju_nodes._normalize_issues(issues)
+        self.assertLessEqual(len(out), 8)
+
+    def test_review_max_tokens_capped(self):
+        captured = {}
+
+        def fake_llm(*args, **kwargs):
+            captured["max_tokens"] = kwargs.get("max_tokens")
+            return json.dumps({"verdict": "PASS", "issues": [], "summary": "ok"}, ensure_ascii=False)
+
+        node = manju_nodes.ManjuDirectorReview()
+        with unittest.mock.patch.object(manju_nodes, "call_llm", side_effect=fake_llm):
+            node.build(TestManjuDirectorReview.SB, "剧本", "{}", api_key="k")
+        self.assertLessEqual(captured["max_tokens"], 8192)
+
 
 class TestDirectorReviewAssets(unittest.TestCase):
     SB_PLAIN = json.dumps({
