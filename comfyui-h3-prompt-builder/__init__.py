@@ -1,4 +1,6 @@
 from .manju_nodes import (
+    ManjuDirectorReview,
+    ManjuImagePrompt,
     ManjuLlmConfig,
     ManjuPreset,
     ManjuResourceMapping,
@@ -9,6 +11,8 @@ from .nodes import H3PromptBuilder
 
 NODE_CLASS_MAPPINGS = {
     "H3PromptBuilder": H3PromptBuilder,
+    "ManjuDirectorReview": ManjuDirectorReview,
+    "ManjuImagePrompt": ManjuImagePrompt,
     "ManjuPreset": ManjuPreset,
     "ManjuScriptToStoryboard": ManjuScriptToStoryboard,
     "ManjuResourceMapping": ManjuResourceMapping,
@@ -18,6 +22,8 @@ NODE_CLASS_MAPPINGS = {
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "H3PromptBuilder": "H3 Prompt Builder（提示词生成）",
+    "ManjuDirectorReview": "漫剧：导演审阅",
+    "ManjuImagePrompt": "漫剧：设定图提示词",
     "ManjuPreset": "漫剧预设",
     "ManjuScriptToStoryboard": "漫剧：剧本→分镜",
     "ManjuResourceMapping": "漫剧：资源映射",

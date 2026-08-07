@@ -95,12 +95,14 @@ def build_system_prompt(style, output_language):
     return "\n\n".join(parts)
 
 
-def call_llm(base_url, api_key, model, system_prompt, user_text, temperature=0.4, max_tokens=8192, timeout=120):
+def call_llm(base_url, api_key, model, system_prompt, user_text, temperature=0.4, max_tokens=8192, timeout=None):
     """调用 OpenAI 兼容 Chat Completions 接口，返回助手文本。"""
     base_url = normalize_endpoint(base_url)
     max_tokens = int(max_tokens)
     cfg = load_config()
     thinking_disabled = cfg.get("thinking_disabled", True)
+    if timeout is None:
+        timeout = cfg.get("request_timeout") or 120
 
     def post(mt):
         payload = {

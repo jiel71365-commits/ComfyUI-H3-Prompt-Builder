@@ -379,6 +379,35 @@ class ManjuPreset:
         return (build_preset_json(style, aspect_ratio, duration, output_language, audio_text_policy),)
 
 
+class ManjuImagePrompt:
+    """漫剧：设定图提示词——独立生成角色/场景/道具设定图提示词（供外部生图模型使用）。"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "assets_json": ("STRING", {"multiline": True, "default": ""}),
+                "preset_json": ("STRING", {"multiline": True, "default": "{}"}),
+            },
+            "optional": {
+                "api_key": ("STRING", {"default": ""}),
+                "model": ("STRING", {"default": ""}),
+                "base_url": ("STRING", {"default": ""}),
+                "llm_config": ("STRING", {"multiline": True, "default": ""}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("image_prompts",)
+    FUNCTION = "build"
+    CATEGORY = "MiniMax H3 / 漫剧"
+
+    def build(self, assets_json, preset_json="{}", api_key="", model="", base_url="", llm_config=""):
+        if not (assets_json or "").strip():
+            return ("请先输入资产清单（分镜节点输出的 assets_json）。",)
+        return (_build_image_prompts_llm(assets_json, preset_json, api_key, model, base_url, llm_config),)
+
+
 class ManjuResourceMapping:
     """漫剧资源映射：解析映射文本；留空时按资源清单自动建议。"""
 
@@ -390,7 +419,7 @@ class ManjuResourceMapping:
             },
             "optional": {
                 "assets_json": ("STRING", {"multiline": True, "default": ""}),
-                "image_prompt_mode": (IMAGE_PROMPT_MODES, {"default": "LLM 生成"}),
+                "image_prompt_mode": (IMAGE_PROMPT_MODES, {"default": "关闭"}),
                 "storyboard_json": ("STRING", {"multiline": True, "default": ""}),
                 "shot_index": ("INT", {"default": 0, "min": 0, "max": 999}),
                 "preset_json": ("STRING", {"multiline": True, "default": "{}"}),
@@ -406,7 +435,7 @@ class ManjuResourceMapping:
     FUNCTION = "build"
     CATEGORY = "MiniMax H3 / 漫剧"
 
-    def build(self, mapping_text, assets_json="", image_prompt_mode="LLM 生成", storyboard_json="", shot_index=0,
+    def build(self, mapping_text, assets_json="", image_prompt_mode="关闭", storyboard_json="", shot_index=0,
               preset_json="{}", api_key="", model="", base_url="", llm_config=""):
         suggested = ""
         image_prompts = ""
@@ -543,6 +572,118 @@ class ManjuScriptToStoryboard:
         if warning:
             summary = warning + "\n" + summary
         return (storyboard_json, assets_json, summary)
+
+
+def _review_storyboard(storyboard_json, script, preset_json, endpoint, key, model_name, review_temp, config):
+    """调用审阅 LLM，返回 (verdict, report_text)。"""
+    system = build_manju_system_prompt("manju_review.txt", "")
+    user_msg = (
+        "【剧本原文】\n" + script
+        + "\n\n【本集预设】\n" + (preset_json or "{}")
+        + "\n\n【分镜 JSON】\n" + storyboard_json
+        + "\n\n请按规则审阅并只输出审阅 JSON。"
+    )
+    raw = call_llm(
+        endpoint, key, model_name, system, user_msg,
+        temperature=review_temp,
+        max_tokens=config.get("max_tokens", 32768),
+    )
+    parsed = _extract_json(raw)
+    if parsed is None:
+        return "FAIL", raw
+    return parsed.get("verdict", "FAIL"), json.dumps(parsed, ensure_ascii=False, indent=2)
+
+
+def _fix_storyboard(storyboard_json, script, issues, endpoint, key, model_name, fix_temp, config):
+    """按审阅问题清单修正分镜，只动问题镜头/资产，返回完整分镜 JSON 文本。"""
+    system = build_manju_system_prompt("manju_storyboard.txt", "")
+    issues_text = json.dumps(issues, ensure_ascii=False, indent=2)
+    user_msg = (
+        "【剧本原文】\n" + script
+        + "\n\n【当前分镜 JSON】\n" + storyboard_json
+        + "\n\n【审阅问题清单】\n" + issues_text
+        + "\n\n请仅修复上述列出的问题，保持其余内容不变；输出完整的分镜 JSON（storyboard + assets）。"
+    )
+    raw = call_llm(
+        endpoint, key, model_name, system, user_msg,
+        temperature=fix_temp,
+        max_tokens=config.get("max_tokens", 32768),
+    )
+    parsed = _extract_json(raw)
+    if parsed is None:
+        raise RuntimeError("修正输出不是合法 JSON，请重试")
+    return json.dumps(parsed, ensure_ascii=False, indent=2)
+
+
+class ManjuDirectorReview:
+    """漫剧：导演审阅——审阅分镜 JSON，循环修正直到 PASS（受 max_review_rounds 上限保护）。"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "storyboard_json": ("STRING", {"multiline": True, "default": ""}),
+                "script": ("STRING", {"multiline": True, "default": ""}),
+                "preset_json": ("STRING", {"multiline": True, "default": "{}"}),
+            },
+            "optional": {
+                "api_key": ("STRING", {"default": ""}),
+                "model": ("STRING", {"default": ""}),
+                "base_url": ("STRING", {"default": ""}),
+                "llm_config": ("STRING", {"multiline": True, "default": ""}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING", "STRING", "STRING")
+    RETURN_NAMES = ("reviewed_storyboard_json", "assets_json", "review_report")
+    FUNCTION = "build"
+    CATEGORY = "MiniMax H3 / 漫剧"
+
+    def build(self, storyboard_json, script, preset_json="{}", api_key="", model="", base_url="", llm_config=""):
+        try:
+            _load_json(storyboard_json, "storyboard_json")
+        except ValueError as exc:
+            return ("错误：" + str(exc), "{}", "")
+        key, model_name, endpoint, temperature, config, warning = resolve_llm_config(api_key, model, base_url, llm_config)
+        if not key:
+            return ("未配置 API Key：请在 LLM 配置节点、节点 api_key 输入框或 config.json 中填写。", "{}", "")
+        max_rounds = int(config.get("max_review_rounds") or 5)
+        review_temp = config.get("reviewer_temperature")
+        try:
+            review_temp = float(review_temp) if review_temp is not None else 0.1
+        except Exception:
+            review_temp = 0.1
+        fix_temp = temperature if temperature is not None else config.get("manju_temperature", 0.2)
+
+        current = storyboard_json
+        report_parts = []
+        reached_limit = False
+        try:
+            for round_no in range(1, max_rounds + 1):
+                verdict, report = _review_storyboard(
+                    current, script, preset_json, endpoint, key, model_name, review_temp, config
+                )
+                report_parts.append("=== 审阅第 %d 轮 ===\n%s" % (round_no, report))
+                parsed = _extract_json(report)
+                issues = parsed.get("issues", []) if parsed else []
+                if verdict == "PASS":
+                    break
+                if round_no == max_rounds:
+                    reached_limit = True
+                    break
+                current = _fix_storyboard(
+                    current, script, issues, endpoint, key, model_name, fix_temp, config
+                )
+        except Exception as exc:
+            return ("LLM 调用失败：" + str(exc), "{}", "")
+
+        final = _load_json(current, "storyboard_json")
+        assets_json = json.dumps(final.get("assets", {}), ensure_ascii=False, indent=2)
+        if reached_limit:
+            report_parts.append("警告：已达最大审阅轮数（%d），分镜仍有未通过项，请人工检查。" % max_rounds)
+        if warning:
+            report_parts.insert(0, warning)
+        return (current, assets_json, "\n".join(report_parts))
 
 
 class ManjuShotPrompt:

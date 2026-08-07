@@ -499,7 +499,7 @@ class TestShotSelect(unittest.TestCase):
 class TestImagePromptMode(unittest.TestCase):
     def test_default_mode(self):
         it = manju_nodes.ManjuResourceMapping.INPUT_TYPES()
-        self.assertEqual(it["optional"]["image_prompt_mode"][1].get("default"), "LLM 生成")
+        self.assertEqual(it["optional"]["image_prompt_mode"][1].get("default"), "关闭")
 
     def test_off_mode_empty(self):
         node = manju_nodes.ManjuResourceMapping()
@@ -532,6 +532,186 @@ class TestImagePromptMode(unittest.TestCase):
         with unittest.mock.patch.object(manju_nodes, "call_llm", side_effect=RuntimeError("boom")):
             out = node.build("", TestAutoSuggest.ASSETS, "LLM 生成", "", 0, "{}", api_key="k")
         self.assertIn("图像提示词生成失败", out[2])
+
+
+class TestRequestTimeout(unittest.TestCase):
+    def _patch_llm(self, cfg, timeout_arg=None):
+        captured = {}
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b'{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}'
+
+        def fake_urlopen(request, timeout):
+            captured["timeout"] = timeout
+            return FakeResp()
+
+        def call():
+            if timeout_arg is None:
+                return nodes.call_llm("https://api.deepseek.com/chat/completions", "k", "m", "s", "u")
+            return nodes.call_llm("https://api.deepseek.com/chat/completions", "k", "m", "s", "u", timeout=timeout_arg)
+
+        return captured, call
+
+    def test_config_timeout_used(self):
+        captured, call = self._patch_llm({"thinking_disabled": True, "request_timeout": 240})
+        with unittest.mock.patch("urllib.request.urlopen", side_effect=self._fake_urlopen(captured)), \
+                unittest.mock.patch.object(nodes, "load_config", return_value={"thinking_disabled": True, "request_timeout": 240}):
+            call()
+        self.assertEqual(captured["timeout"], 240)
+
+    def test_explicit_timeout_wins(self):
+        captured, call = self._patch_llm({"thinking_disabled": True}, timeout_arg=77)
+        with unittest.mock.patch("urllib.request.urlopen", side_effect=self._fake_urlopen(captured)), \
+                unittest.mock.patch.object(nodes, "load_config", return_value={"thinking_disabled": True}):
+            call()
+        self.assertEqual(captured["timeout"], 77)
+
+    def _fake_urlopen(self, captured):
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b'{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}'
+
+        def fake_urlopen(request, timeout):
+            captured["timeout"] = timeout
+            return FakeResp()
+
+        return fake_urlopen
+
+
+class TestManjuImagePromptNode(unittest.TestCase):
+    def test_input_types(self):
+        it = manju_nodes.ManjuImagePrompt.INPUT_TYPES()
+        self.assertIn("assets_json", it["required"])
+        self.assertIn("preset_json", it["required"])
+
+    def test_empty_assets(self):
+        node = manju_nodes.ManjuImagePrompt()
+        out = node.build("", "{}")
+        self.assertIn("请先输入资产清单", out[0])
+
+    def test_llm_called(self):
+        captured = []
+
+        def fake_llm(*args, **kwargs):
+            captured.append((args[3], args[4]))
+            return "MOCK_IMG"
+
+        node = manju_nodes.ManjuImagePrompt()
+        with unittest.mock.patch.object(manju_nodes, "call_llm", side_effect=fake_llm):
+            out = node.build(TestAutoSuggest.ASSETS, '{"style":"古风"}', api_key="k")
+        self.assertEqual(out[0], "MOCK_IMG")
+        system, user = captured[0]
+        self.assertIn("美术设定师", system)
+        self.assertIn("资源清单", user)
+        self.assertIn("古风", user)
+
+
+class TestManjuV24Rules(unittest.TestCase):
+    def test_storyboard_rules_upgraded(self):
+        content = manju_nodes.read_text_file(os.path.join(manju_nodes.RULES_DIR, "manju_storyboard.txt"))
+        for keyword in ("purpose", "coverage", "情绪外化表", "边界锁", "镜头设计样例"):
+            self.assertIn(keyword, content)
+
+    def test_review_rules_exist(self):
+        content = manju_nodes.read_text_file(os.path.join(manju_nodes.RULES_DIR, "manju_review.txt"))
+        for keyword in ("覆盖率", "轴线", "连续性", "时长对账", "动作具体性", "情绪外化", "资产完整性", "台词"):
+            self.assertIn(keyword, content)
+
+
+class TestManjuDirectorReview(unittest.TestCase):
+    SB = json.dumps({
+        "storyboard": {
+            "duration_seconds": 6,
+            "coverage": [{"beat": "b1", "source_text": "s", "shot_ids": [1], "status": "covered"}],
+            "shots": [
+                {"shot_id": 1, "duration": 3, "time_range": "0:00-0:03", "scene": "场景A", "characters": ["角色A"], "props": [], "action": "角色A站在原地", "camera": "固定镜头", "continuity": {"start": "s1", "end": "e1"}, "purpose": "建立空间"},
+                {"shot_id": 2, "duration": 3, "time_range": "0:03-0:06", "scene": "场景A", "characters": ["角色A"], "props": [], "action": "角色A抬手", "camera": "固定镜头", "continuity": {"start": "e1", "end": "e2"}, "purpose": "反应"},
+            ],
+        },
+        "assets": {"characters": [{"id": "角色A", "description": "", "shots": [1, 2]}], "scenes": [{"id": "场景A", "description": "", "shots": [1, 2]}], "props": []},
+    }, ensure_ascii=False)
+
+    def test_pass_single_call(self):
+        calls = []
+
+        def fake_llm(*args, **kwargs):
+            calls.append(args[4])
+            return json.dumps({"verdict": "PASS", "issues": [], "summary": "ok"}, ensure_ascii=False)
+
+        node = manju_nodes.ManjuDirectorReview()
+        with unittest.mock.patch.object(manju_nodes, "call_llm", side_effect=fake_llm):
+            out = node.build(self.SB, "第一集剧本", "{}", api_key="k")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(json.loads(out[0])["storyboard"]["duration_seconds"], 6)
+        self.assertIn("PASS", out[2])
+        self.assertIn("审阅第 1 轮", out[2])
+
+    def test_fail_then_fix_then_pass(self):
+        fixed = json.dumps({
+            "storyboard": {
+                "duration_seconds": 6,
+                "coverage": [{"beat": "b1", "source_text": "s", "shot_ids": [1], "status": "covered"}],
+                "shots": [
+                    {"shot_id": 1, "duration": 3, "time_range": "0:00-0:03", "scene": "场景A", "characters": ["角色A"], "props": [], "action": "角色A慢慢抬起右手", "camera": "固定镜头", "continuity": {"start": "s1", "end": "e1"}, "purpose": "建立空间"},
+                    {"shot_id": 2, "duration": 3, "time_range": "0:03-0:06", "scene": "场景A", "characters": ["角色A"], "props": [], "action": "角色A抬头看向门口", "camera": "固定镜头", "continuity": {"start": "e1", "end": "e2"}, "purpose": "反应"},
+                ],
+            },
+            "assets": {"characters": [{"id": "角色A", "description": "", "shots": [1, 2]}], "scenes": [{"id": "场景A", "description": "", "shots": [1, 2]}], "props": []},
+        }, ensure_ascii=False)
+        seq = [
+            json.dumps({"verdict": "FAIL", "issues": [{"severity": "high", "shot_id": "1", "field": "action", "problem": "抽象动词", "suggestion": "改肢体动作"}], "summary": "fix"}, ensure_ascii=False),
+            fixed,
+            json.dumps({"verdict": "PASS", "issues": [], "summary": "ok"}, ensure_ascii=False),
+        ]
+        calls = []
+
+        def fake_llm(*args, **kwargs):
+            calls.append(args[4])
+            return seq[len(calls) - 1]
+
+        node = manju_nodes.ManjuDirectorReview()
+        with unittest.mock.patch.object(manju_nodes, "call_llm", side_effect=fake_llm):
+            out = node.build(self.SB, "第一集剧本", "{}", api_key="k")
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(json.loads(out[0])["storyboard"]["shots"][0]["action"], "角色A慢慢抬起右手")
+        self.assertIn("问题清单", calls[1])
+        self.assertIn("仅修复", calls[1])
+        self.assertIn("PASS", out[2])
+
+    def test_max_rounds_warning(self):
+        def fake_llm(*args, **kwargs):
+            return json.dumps({"verdict": "FAIL", "issues": [{"severity": "high", "shot_id": "-1", "field": "coverage", "problem": "x", "suggestion": "y"}], "summary": "still bad"}, ensure_ascii=False)
+
+        node = manju_nodes.ManjuDirectorReview()
+        cfg = {"api_key": "k", "max_review_rounds": 2, "reviewer_temperature": 0.1, "manju_temperature": 0.2}
+        with unittest.mock.patch.object(manju_nodes, "call_llm", side_effect=fake_llm), \
+                unittest.mock.patch.object(manju_nodes, "load_config", return_value=cfg):
+            out = node.build(self.SB, "第一集剧本", "{}")
+        self.assertIn("已达最大审阅轮数", out[2])
+
+    def test_no_api_key(self):
+        node = manju_nodes.ManjuDirectorReview()
+        with unittest.mock.patch.object(manju_nodes, "load_config", return_value={"api_key": ""}):
+            out = node.build(self.SB, "第一集剧本", "{}")
+        self.assertIn("未配置 API Key", out[0])
+
+    def test_invalid_json(self):
+        node = manju_nodes.ManjuDirectorReview()
+        out = node.build("not json", "第一集剧本", "{}")
+        self.assertIn("错误", out[0])
 
 
 if __name__ == "__main__":
