@@ -511,6 +511,28 @@ class TestImagePromptMode(unittest.TestCase):
         for keyword in ("三视图", "面部特写", "双手自然垂下"):
             self.assertIn(keyword, content)
 
+    def test_llm_mode_calls_llm(self):
+        captured = []
+
+        def fake_llm(*args, **kwargs):
+            captured.append((args[3], args[4]))
+            return "MOCK_IMAGE_PROMPTS"
+
+        node = manju_nodes.ManjuResourceMapping()
+        with unittest.mock.patch.object(manju_nodes, "call_llm", side_effect=fake_llm):
+            out = node.build("", TestAutoSuggest.ASSETS, "LLM 生成", "", 0, '{"style":"古风"}', api_key="k")
+        system, user_msg = captured[0]
+        self.assertIn("美术设定师", system)
+        self.assertIn("资源清单", user_msg)
+        self.assertIn("古风", user_msg)
+        self.assertEqual(out[2], "MOCK_IMAGE_PROMPTS")
+
+    def test_llm_mode_failure_message(self):
+        node = manju_nodes.ManjuResourceMapping()
+        with unittest.mock.patch.object(manju_nodes, "call_llm", side_effect=RuntimeError("boom")):
+            out = node.build("", TestAutoSuggest.ASSETS, "LLM 生成", "", 0, "{}", api_key="k")
+        self.assertIn("图像提示词生成失败", out[2])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -311,6 +311,30 @@ def _build_image_prompts(assets, style=""):
     return "\n".join(lines)
 
 
+def _build_image_prompts_llm(assets_json, preset_json, api_key, model, base_url, llm_config):
+    """调用 LLM 生成设定图提示词（规则文件 manju_image_prompt.txt）。"""
+    key, model_name, endpoint, temperature, config, warning = resolve_llm_config(api_key, model, base_url, llm_config)
+    if not key:
+        return "图像提示词生成失败：未配置 API Key"
+    system = build_manju_system_prompt("manju_image_prompt.txt", "")
+    user_msg = (
+        "【资源清单】\n" + (assets_json or "{}")
+        + "\n\n【本集预设】\n" + (preset_json or "{}")
+        + "\n\n请按规则生成全部设定图提示词。"
+    )
+    try:
+        out = call_llm(
+            endpoint, key, model_name, system, user_msg,
+            temperature=temperature if temperature is not None else config.get("temperature", 0.4),
+            max_tokens=config.get("max_tokens", 32768),
+        )
+        if warning:
+            out = warning + "\n" + out
+        return out
+    except Exception as exc:
+        return "图像提示词生成失败：%s" % (exc,)
+
+
 def _style_from_preset(preset_json):
     if preset_json and preset_json.strip():
         try:
