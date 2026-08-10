@@ -639,6 +639,7 @@ def _normalize_issues(issues):
     """规范化审阅问题：过滤无效/超长/复读条目并限数；axis/continuity/action/duration 的 high 降级为 medium。"""
     out = []
     downgrade_fields = ("axis", "continuity", "action", "duration")
+    speculative_words = ("可能", "或许", "应在场", "可能有", "也许")
     for issue in issues or []:
         if not isinstance(issue, dict):
             continue
@@ -646,11 +647,15 @@ def _normalize_issues(issues):
         suggestion = str(issue.get("suggestion") or "")
         if "无需修改" in problem or suggestion.strip() in ("", "无"):
             continue
+        if any(word in problem for word in ("无改写", "完整保留", "确认一致")):
+            continue
         if len(problem + suggestion) > 800:
             continue
         if _is_repetitive(problem) or _is_repetitive(suggestion):
             continue
         if issue.get("severity") == "high" and str(issue.get("field") or "") in downgrade_fields:
+            issue["severity"] = "medium"
+        if issue.get("severity") == "high" and any(word in problem for word in speculative_words):
             issue["severity"] = "medium"
         out.append(issue)
         if len(out) >= 8:

@@ -811,6 +811,24 @@ class TestIssueNormalize(unittest.TestCase):
         out = manju_nodes._normalize_issues(issues)
         self.assertLessEqual(len(out), 8)
 
+    def test_no_rewrite_claim_removed(self):
+        issues = [{"severity": "high", "field": "dialogue", "problem": "台词完整保留，无改写，但未标注说话人", "suggestion": "x"}]
+        out = manju_nodes._normalize_issues(issues)
+        self.assertEqual(len(out), 0)
+
+    def test_speculative_high_downgraded(self):
+        issues = [
+            {"severity": "high", "field": "assets", "problem": "背景中可能有族人", "suggestion": "x"},
+            {"severity": "high", "field": "coverage", "problem": "关键节拍无镜头落实", "suggestion": "加镜头"},
+        ]
+        out = manju_nodes._normalize_issues(issues)
+        self.assertEqual([i["severity"] for i in out], ["medium", "high"])
+
+    def test_inconsistent_kept(self):
+        issues = [{"severity": "high", "field": "continuity", "problem": "左右占位不一致", "suggestion": "统一"}]
+        out = manju_nodes._normalize_issues(issues)
+        self.assertEqual(len(out), 1)
+
     def test_review_max_tokens_capped(self):
         captured = {}
 
