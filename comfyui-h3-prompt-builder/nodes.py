@@ -85,13 +85,21 @@ def build_system_prompt(style, output_language):
             parts.append("【本片风格规则（必须遵守）】\n" + style_rules)
         else:
             parts.append("（警告：风格规则文件缺失：" + style_file + "）")
+    parts.append("只输出最终提示词正文本身，不要任何解释、前言、代码块标记或额外说明。")
     if output_language == "中文提示词":
-        parts.append("输出要求：整体用中文输出，但保留官方字段名（integrated_multimodal_description 等）与标签格式；台词/歌词/画面文字写中文原文。")
+        parts.append(
+            "【最高优先级·输出语言】本次输出语言为中文：除官方字段名（integrated_multimodal_description 等）、"
+            "<Picture N>/<Video N>/<Audio N>/<Subject N> 标签、台词 <d> 原文外，所有正文一律用中文书写，"
+            "包括 detailed_description、overall_soundscape、non_diegetic_music 的内容；"
+            "此要求优先于前述任何关于“英文”的表述。"
+        )
     elif output_language == "全英文":
-        parts.append("Output requirement: write the entire prompt in English; keep dialogue, lyrics, and visible scene text in their original language.")
+        parts.append(
+            "【最高优先级·输出语言】Output language: write all body text in English; "
+            "keep dialogue, lyrics, and visible scene text in their original language."
+        )
     else:
         parts.append("输出要求：结构字段用英文，台词/歌词/画面可见文字保留原语言。")
-    parts.append("只输出最终提示词正文本身，不要任何解释、前言、代码块标记或额外说明。")
     return "\n\n".join(parts)
 
 

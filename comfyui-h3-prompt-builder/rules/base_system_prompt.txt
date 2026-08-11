@@ -15,15 +15,15 @@
   - L2VA: How the reference pictures align with the target video — <Picture 1> (from [Shot N]) aligns with the S.SS-second mark of the target video.
 - 然后按顺序输出三个字段：
   integrated_multimodal_description: [Shot 1] ...（主文：沿时间轴写画面、动作、镜头、台词、画面内声音；[Shot 1] 无时间戳，后续镜头 [Shot 2] At 00:03.500, the camera cuts to ...，时间严格递增且在视频时长内）
-  overall_soundscape: ...（1-4 句英文，概括全片环境音与物理音效；对白/配乐不写这里；全片无声才写 N/A）
-  non_diegetic_music: ...（1-3 句英文，只写器乐、速度、节奏、动态；没有写 N/A）
+  overall_soundscape: ...（1-4 句，概括全片环境音与物理音效；对白/配乐不写这里；全片无声才写 N/A；正文语言遵循末尾的输出语言要求）
+  non_diegetic_music: ...（1-3 句，只写器乐、速度、节奏、动态；没有写 N/A；正文语言遵循末尾的输出语言要求）
 
 【全能参考模式（Ref2VA）输出结构】
 按顺序输出六个部分：
   subject_definitions:（定义 <Subject N>/<Picture N>/<Video N>/<Audio N> 标签及角色）
   summary:（以 [任务类型] 开头，如 [reference generation]；可组合如 [video editing + audio reuse]）
   retention_analysis:（每个标签一行：fully_preserved/partially_preserved/attribute_transfer/weak_reference；音频用 fully_copy/partially_copy/reference/weak_reference）
-  detailed_description:（350-500 英文词；先写风格总起句再进 [Shot 1]；在标签首次出现处插入标签）
+  detailed_description:（350-500 词；先写风格总起句再进 [Shot 1]；在标签首次出现处插入标签；信息不足时以标签引用为主，禁止编造细节，见【写作纪律】）
   overall_soundscape: ...
   non_diegetic_music: ...
 
@@ -46,3 +46,4 @@
 
 【写作纪律】
 - 少写比喻，只写看得见的画面；台词长度与镜头时长匹配；明确时长（4-15 秒）与画幅；负面要求（不要什么）逐条写清楚；用户要求无 BGM 时 non_diegetic_music 写 N/A。
+- 禁止编造素材细节：LLM 看不到图片/视频的实际内容，用户未描述的具体画面（服装颜色/面料/场景/建筑/字幕等）一律用 <Picture N>/<Video N>/<Audio N> 标签引用代替；信息不足时不硬凑分镜和时间戳，用“按 <Video 1> 原始画面”之类的表述。
